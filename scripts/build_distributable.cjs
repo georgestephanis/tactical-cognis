@@ -33,12 +33,12 @@ try {
   console.log("Creating dedicated distributable build folder...");
   fs.renameSync(distPath, distDistPath);
 
-  // 4. Verify no database/backup/override files are present in distribution (recursive)
+  // 4. Verify no database/backup files are present in distribution (recursive)
   const distFiles = fs.readdirSync(distDistPath, { recursive: true });
   distFiles.forEach(f => {
     const rel = String(f);
     const base = path.basename(rel);
-    if (base.endsWith('.sqlite') || base.endsWith('.bak') || base === 'mfm-overrides.json') {
+    if (base.endsWith('.sqlite') || base.endsWith('.bak')) {
       console.log(`Removing compiled data file to prevent IP leakage: ${rel}`);
       fs.unlinkSync(path.join(distDistPath, rel));
     }

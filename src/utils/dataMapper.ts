@@ -10,33 +10,9 @@ import { initDatabase, getUnitsByFaction, getDetachmentsByFaction, normalizeName
 
 export { normalizeName };
 
-interface MfmOverrides {
-  factions?: Record<string, {
-    detachments?: Record<string, { rule?: string | null; restrictions?: string[] }>;
-  }>;
-}
-
-let mfmOverrides: MfmOverrides | null = null;
-
-/**
- * Load the consolidated MFM overrides once.
- */
-async function loadMfmOverrides() {
-  if (mfmOverrides) return mfmOverrides;
-  try {
-    const res = await fetch('/mfm-overrides.json');
-    mfmOverrides = await res.json();
-    return mfmOverrides;
-  } catch (err) {
-    console.error("Failed to load mfm-overrides.json", err);
-    return { factions: {} };
-  }
-}
-
 export interface MergedFaction {
   factionName: string;
   slug: string;
-  version: string;
   appRawList: Datasheet[];
   units: MergedUnit[];
   detachments: MergedDetachment[];
@@ -44,7 +20,7 @@ export interface MergedFaction {
 
 /**
  * A single pricing tier for a unit, derived from the datasheet's SQLite-native
- * `compositions`. Replaces the old MFM `costs` array.
+ * `compositions`.
  */
 export interface DerivedCost {
   label: string;
@@ -85,17 +61,11 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
   const cached = factionCache.get(factionSlug);
   if (cached) return cached;
 
-  // Initialize DB and Overrides
-  const [, overrides] = await Promise.all([
-    initDatabase('/40k.sqlite'),
-    loadMfmOverrides()
-  ]);
+  await initDatabase('/40k.sqlite');
 
   // Fetch results from SQLite
   const dbUnits = await getUnitsByFaction(factionSlug);
   const dbDetachments = await getDetachmentsByFaction(factionSlug);
-
-  const factionOverrides = overrides?.factions?.[factionSlug];
 
   const mergedUnits: MergedUnit[] = [];
 
@@ -144,16 +114,12 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
     if (!seenDetachmentIds.has(id)) {
       seenDetachmentIds.add(id);
 
-      const detSlug = String(appDet.slug);
-      const detOverride = factionOverrides?.detachments?.[detSlug];
-
       mergedDetachments.push({
         name: String(appDet.name),
-        slug: detSlug,
+        slug: String(appDet.slug),
         isCombatPatrol: !!appDet.isCombatPatrol,
         isFactionPack: false,
         detachmentPointsCost: appDet.detachmentPointsCost,
-        rule: detOverride?.rule || null,
         rules: appDet.rules,
         enhancements: (appDet.enhancements || []).map(e => ({
           name: e.name,
@@ -161,10 +127,9 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
           cannotBeWarlord: e.cannotBeWarlord,
           lore: e.lore,
           rules: e.rules,
-          leader: null,
         })),
         stratagems: appDet.stratagems || [],
-        restrictions: [...(appDet.restrictions || []), ...(detOverride?.restrictions || [])],
+        restrictions: appDet.restrictions || [],
       });
     }
   });
@@ -174,7 +139,6 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
   const merged: MergedFaction = {
     factionName: factionSlug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
     slug: factionSlug,
-    version: 'SQLite Native',
     appRawList: dbUnits as unknown as Datasheet[],
     units: mergedUnits,
     detachments: mergedDetachments,

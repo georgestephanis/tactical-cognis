@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Shield, Sparkles, AlertCircle, RefreshCw, BarChart2, Info, Compass, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronLeft, Shield, Sparkles, AlertCircle, RefreshCw, BarChart2, Compass, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { loadAndMergeFaction, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
 import type { MergedUnit, WeaponProfile } from '../types/data';
@@ -164,11 +164,8 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
           <ChevronLeft size={16} /> Registry
         </button>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--accent-teal)', fontFamily: 'var(--font-mono)' }}>
-            MFM Version: {factionData.version}
-          </div>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Reconciled App Data Version: {appDataVersion}
+            Companion App Data Version: {appDataVersion}
           </span>
         </div>
       </div>
@@ -476,7 +473,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                   {isExpanded && (
                     <div style={{ padding: '0 2rem 2rem 2rem', display: 'flex', flexDirection: 'column', gap: '2rem', borderTop: '1px solid var(--glass-border)', paddingTop: '1.5rem' }}>
 
-                      {/* Restrictions from MFM */}
+                      {/* Detachment restrictions */}
                       {det.restrictions && det.restrictions.length > 0 && (
                         <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.15)', padding: '0.75rem 1rem', borderRadius: '8px' }}>
                           <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-red)', textTransform: 'uppercase', display: 'block', marginBottom: '0.25rem' }}>
@@ -546,14 +543,6 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                                   <p style={{ whiteSpace: 'pre-line', color: 'var(--text-primary)', fontSize: '0.85rem', margin: 0, lineHeight: '1.4' }}>
                                     {enh.rules}
                                   </p>
-                                )}
-                                {enh.leader && (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.03)' }}>
-                                    <Info size={12} style={{ color: 'var(--text-muted)' }} />
-                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                      Leader Restriction: <strong style={{ color: 'var(--accent-teal)' }}>{enh.leader}</strong>
-                                    </span>
-                                  </div>
                                 )}
                               </div>
                             ))}
@@ -700,7 +689,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
             <h3 style={{ margin: 0 }}>Point Efficiency Breakdown (Wounds/OC per 100 Points)</h3>
           </div>
           <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>
-            This analysis evaluates the raw defensive efficiency (Wounds per 100 points) and control efficiency (OC per 100 points) of all units in this faction, calculated using their average MFM points and composition model counts.
+            This analysis evaluates the raw defensive efficiency (Wounds per 100 points) and control efficiency (OC per 100 points) of all units in this faction, calculated using their average points and composition model counts.
           </p>
 
           {efficiencyMetrics.length === 0 ? (

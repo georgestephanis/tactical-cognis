@@ -877,7 +877,7 @@ export const DeepAnalysis: React.FC = () => {
                   Faction Leaders & Attachment Directory
                 </h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-                  A lookup tool matching leaders (Characters) with compatible bodyguard squads based on MFM database constraints.
+                  A lookup tool matching leaders (Characters) with compatible bodyguard squads based on companion-app datasheet constraints.
                 </p>
 
                 {factionData?.units ? (

@@ -28,7 +28,7 @@ npm run build                 # production web build → dist/ (may include your
 npm run build:distributable   # IP-free static site → dist-distributable/ — host this one
 ```
 
-`build:distributable` ([scripts/build_distributable.cjs](./scripts/build_distributable.cjs)) temporarily hides any local `public/40k.sqlite`, compiles, and recursively strips `.sqlite`/`.bak`/`mfm-overrides.json` files from the output — so `dist-distributable/` ships with zero game data, just HTML/JS/CSS/WASM. Visitors with no database land on the in-browser upload prompt and supply their own. This is the folder to host publicly.
+`build:distributable` ([scripts/build_distributable.cjs](./scripts/build_distributable.cjs)) temporarily hides any local `public/40k.sqlite`, compiles, and recursively strips `.sqlite`/`.bak` files from the output — so `dist-distributable/` ships with zero game data, just HTML/JS/CSS/WASM. Visitors with no database land on the in-browser upload prompt and supply their own. This is the folder to host publicly.
 
 ### Serving the production build
 

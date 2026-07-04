@@ -131,7 +131,7 @@ function App() {
     if (!isDbLoadedState) return;
 
     let title = 'WH40k Tactical Cognis Database | Yield & Efficiency Analysis';
-    let description = 'Interactive tactical analyzer for Warhammer 40k. Reconcile companion datasheets and MFM rules to compute expected damage and points yield.';
+    let description = 'Interactive tactical analyzer for Warhammer 40k. Analyze companion-app datasheets to compute expected damage and points yield.';
 
     if (view === 'faction' && activeFactionSlug) {
       const factionName = activeFactionSlug.replace(/-/g, ' ').toUpperCase();
@@ -273,7 +273,7 @@ function App() {
       {/* Footer bar */}
       <footer style={{ marginTop: '4rem', paddingTop: '1.5rem', borderTop: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
         <div>
-          © Games Workshop. Unofficial companion analysis tool. Re-scraped under MFM v1.0.
+          © Games Workshop. Unofficial companion analysis tool. All data is loaded locally from your own database.
         </div>
         <div style={{ fontFamily: 'var(--font-mono)' }}>
           SEC_KEY: COMPANION_APP_DB_{dbVersion}

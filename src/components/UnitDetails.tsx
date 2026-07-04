@@ -191,7 +191,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                   </h3>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block' }}>MFM Cost</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block' }}>Points Cost</span>
                   <strong className="text-gold" style={{ fontSize: '1.25rem' }}>{unitPoints > 0 ? `${unitPoints} pts` : 'Combat Patrol'}</strong>
                 </div>
               </div>
@@ -459,7 +459,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
 
               {/* Unit Composition & Costs */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                {/* Compositions (From companion app/MFM) */}
+                {/* Compositions (from companion app data) */}
                 <div style={{ background: 'var(--bg-tertiary)', padding: '1.25rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.03)' }}>
                   <h4 style={{ textTransform: 'uppercase', fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <BookOpen size={16} style={{ color: 'var(--accent-teal)' }} />

@@ -11,7 +11,7 @@ Tactical Cognis is a React + Vite web app for analyzing Warhammer 40k army data 
 This repo must never contain datasheets, points values, wargear text, or any other GW content — scraped, hardcoded, or as a committed fixture file. See [[project-no-gw-ip]] in memory for the full rationale.
 
 - `public/40k.sqlite` is gitignored and only ever exists locally (see `manual-db-sqlite.md`) or is supplied by a user at runtime via the upload screen (`src/components/DatabaseUploadView.tsx`).
-- `npm run build:distributable` (`scripts/build_distributable.cjs`) is the build to trust for anything that leaves your machine: it hides any local `public/40k.sqlite` before compiling and deletes stray `.sqlite`/`.bak`/`mfm-overrides.json` files from the output. `dist-distributable/` is the folder to host — HTML/JS/CSS/WASM only.
+- `npm run build:distributable` (`scripts/build_distributable.cjs`) is the build to trust for anything that leaves your machine: it hides any local `public/40k.sqlite` before compiling and deletes stray `.sqlite`/`.bak` files from the output. `dist-distributable/` is the folder to host — HTML/JS/CSS/WASM only.
 - If a database isn't present at runtime, the app falls back to `DatabaseUploadView` instead of failing — don't "fix" that by bundling a sample DB.
 - Never add fixture `.sqlite` files or hardcoded unit/datasheet JSON for tests or demos. Use obviously-fake placeholder data if a test needs a shape to assert against.
 
@@ -33,7 +33,7 @@ There is no wired-up test command. `src/utils/mathhammer.test.ts` exports `runMa
 
 - `src/App.tsx` — top-level router. No react-router; view state is synced to `?view=&faction=&unit=` query params by hand via `history.pushState`/`popstate`.
 - `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers.
-- `src/utils/dataMapper.ts` — merges raw DB rows with `public/mfm-overrides.json` (balance/errata overrides) into the `MergedUnit`/`MergedFaction` shapes the UI consumes.
+- `src/utils/dataMapper.ts` — maps raw DB rows into the `MergedUnit`/`MergedFaction` shapes the UI consumes.
 - `src/utils/mathhammer.ts` — pure combat-math engine (hit/wound/save/damage expectation, devastating wounds, FNP, AP reduction, etc.), no DB or React dependency.
 - `src/components/` — one component per view (`Dashboard`, `FactionBrowser`, `UnitDetails`, `ArmyBuilder`, `DeepAnalysis`) plus `DatabaseUploadView` for the no-DB fallback.
 - This is a browser-only app — no Electron, no desktop shell. `scripts/find-db.cjs` (`npm run db:find`) is a plain Node script for local dev convenience only; it never runs as part of the build.

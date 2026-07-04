@@ -1,4 +1,4 @@
-// Type definitions for WH40k Companion App and MFM data
+// Type definitions for WH40k Companion App data
 
 export interface Statline {
   M: string;
@@ -136,57 +136,12 @@ export interface AppFactionData {
   detachments?: AppDetachment[];
 }
 
-// Munitorum Field Manual Types
-export interface MfmEnhancement {
-  name: string;
-  points: number;
-  leader: string | null;
-}
-
-export interface MfmDetachment {
-  name: string;
-  detachment_points: string | null;
-  rule: string | null;
-  restrictions: string[];
-  enhancements: MfmEnhancement[];
-}
-
-export interface MfmCost {
-  models: number | null;
-  label: string;
-  points: number | null;
-}
-
-export interface MfmWargearOption {
-  option: string;
-  points: number;
-}
-
-export interface MfmUnit {
-  name: string;
-  costs: MfmCost[];
-  leads?: string[];
-  support?: string[];
-  wargear_options?: MfmWargearOption[];
-}
-
-export interface MfmFactionData {
-  faction: string;
-  slug: string;
-  version: string;
-  source_url: string;
-  scraped_at: string;
-  detachments: MfmDetachment[];
-  units: MfmUnit[];
-}
-
 export interface MergedDetachment {
   name: string;
   slug: string;
   isCombatPatrol: boolean;
   isFactionPack: boolean;
   detachmentPointsCost: number | null;
-  rule: string | null; // e.g. "RECONNAISSANCE"
   rules: AppDetachmentRule[];
   enhancements: {
     name: string;
@@ -194,10 +149,9 @@ export interface MergedDetachment {
     cannotBeWarlord: boolean;
     lore: string | null;
     rules: string | null;
-    leader: string | null; // from MFM points
   }[];
   stratagems: AppStratagem[];
-  restrictions: string[]; // from MFM
+  restrictions: string[]; // detachment unique-keyword restrictions from the DB
 }
 
 // Unified mapping structure for the application
