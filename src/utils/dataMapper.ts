@@ -10,7 +10,13 @@ import { initDatabase, getUnitsByFaction, getDetachmentsByFaction, normalizeName
 
 export { normalizeName };
 
-let mfmOverrides: any = null;
+interface MfmOverrides {
+  factions?: Record<string, {
+    detachments?: Record<string, { rule?: string | null; restrictions?: string[] }>;
+  }>;
+}
+
+let mfmOverrides: MfmOverrides | null = null;
 
 /**
  * Load the consolidated MFM overrides once.
@@ -80,7 +86,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
   if (cached) return cached;
 
   // Initialize DB and Overrides
-  const [_, overrides] = await Promise.all([
+  const [, overrides] = await Promise.all([
     initDatabase('/40k.sqlite'),
     loadMfmOverrides()
   ]);
@@ -89,7 +95,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
   const dbUnits = await getUnitsByFaction(factionSlug);
   const dbDetachments = await getDetachmentsByFaction(factionSlug);
 
-  const factionOverrides = overrides?.factions?.[factionSlug] || { detachments: {} };
+  const factionOverrides = overrides?.factions?.[factionSlug];
 
   const mergedUnits: MergedUnit[] = [];
 
@@ -139,7 +145,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       seenDetachmentIds.add(id);
 
       const detSlug = String(appDet.slug);
-      const detOverride = factionOverrides.detachments[detSlug] || {};
+      const detOverride = factionOverrides?.detachments?.[detSlug];
 
       mergedDetachments.push({
         name: String(appDet.name),
@@ -147,7 +153,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
         isCombatPatrol: !!appDet.isCombatPatrol,
         isFactionPack: false,
         detachmentPointsCost: appDet.detachmentPointsCost,
-        rule: detOverride.rule || null,
+        rule: detOverride?.rule || null,
         rules: appDet.rules,
         enhancements: (appDet.enhancements || []).map(e => ({
           name: e.name,
@@ -158,7 +164,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
           leader: null,
         })),
         stratagems: appDet.stratagems || [],
-        restrictions: [...(appDet.restrictions || []), ...(detOverride.restrictions || [])],
+        restrictions: [...(appDet.restrictions || []), ...(detOverride?.restrictions || [])],
       });
     }
   });

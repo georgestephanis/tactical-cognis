@@ -40,9 +40,12 @@ export function DatabaseUploadView({ onDbLoaded }: DatabaseUploadViewProps) {
         onDbLoaded(stats.dataVersion);
       }, 1000);
 
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to process the SQLite file. Please check that it is a valid database.");
+      const message = err instanceof Error && err.message
+        ? err.message
+        : "Failed to process the SQLite file. Please check that it is a valid database.";
+      setError(message);
       setLoading(false);
     }
   };
@@ -57,7 +60,7 @@ export function DatabaseUploadView({ onDbLoaded }: DatabaseUploadViewProps) {
     }
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
@@ -65,7 +68,7 @@ export function DatabaseUploadView({ onDbLoaded }: DatabaseUploadViewProps) {
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       processFile(e.dataTransfer.files[0]);
     }
-  }, []);
+  };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {

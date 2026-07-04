@@ -3,6 +3,7 @@ import { Target, BarChart2, Shield, Sparkles, AlertCircle, RefreshCw, Flame, Use
 import { calculateExpectedDamage, TARGET_PRESETS } from '../utils/mathhammer';
 import type { MathhammerInput, TargetProfile } from '../utils/mathhammer';
 import { loadAndMergeFaction, getDatasheetCosts } from '../utils/dataMapper';
+import type { MergedFaction } from '../utils/dataMapper';
 import type { MergedUnit } from '../types/data';
 
 interface FactionSummary {
@@ -16,7 +17,7 @@ export const DeepAnalysis: React.FC = () => {
   // Global Faction List
   const [factionsList, setFactionsList] = useState<FactionSummary[]>([]);
   const [selectedFaction, setSelectedFaction] = useState<string>('orks');
-  const [factionData, setFactionData] = useState<any>(null);
+  const [factionData, setFactionData] = useState<MergedFaction | null>(null);
   const [loadingFaction, setLoadingFaction] = useState(false);
 
   // Sub Tabs
@@ -95,10 +96,12 @@ export const DeepAnalysis: React.FC = () => {
     loadFaction();
   }, [selectedFaction]);
 
-  // Sync target profile with selected preset
-  useEffect(() => {
-    if (selectedTargetPreset === 'custom') return;
-    const preset = TARGET_PRESETS.find(p => p.name.includes(selectedTargetPreset));
+  // Apply a target preset's profile to the target state.
+  // (Initial state already matches the default 'MEQ' preset.)
+  const applyTargetPreset = (name: string) => {
+    setSelectedTargetPreset(name);
+    if (name === 'custom') return;
+    const preset = TARGET_PRESETS.find(p => p.name.includes(name));
     if (preset) {
       setTargetT(preset.t);
       setTargetSv(preset.sv);
@@ -108,7 +111,7 @@ export const DeepAnalysis: React.FC = () => {
       setTargetUnitSize(preset.unitSize);
       setTargetKeywords(preset.keywords.join(', '));
     }
-  }, [selectedTargetPreset]);
+  };
 
   // Construct target profile from state
   const currentTarget: TargetProfile = {
@@ -171,7 +174,7 @@ export const DeepAnalysis: React.FC = () => {
 
       // Calculate Expected Damage for all weapons combined
       let totalExpectedDamage = 0;
-      let weaponLogs: string[] = [];
+      const weaponLogs: string[] = [];
 
       firstModel.weapons?.forEach(wp => {
         if (wp.wargearType !== 'weapon') return;
@@ -229,8 +232,8 @@ export const DeepAnalysis: React.FC = () => {
         weaponLogs
       };
     })
-    .filter((e: any) => e !== null)
-    .sort((a: any, b: any) => {
+    .filter(e => e !== null)
+    .sort((a, b) => {
       if (effMetric === 'wounds') return b.woundsPer100 - a.woundsPer100;
       if (effMetric === 'oc') return b.ocPer100 - a.ocPer100;
       return b.damagePer100 - a.damagePer100;
@@ -431,7 +434,7 @@ export const DeepAnalysis: React.FC = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div className="input-group">
                     <label>Hit Re-rolls</label>
-                    <select className="input-control" value={hitReRoll} onChange={(e) => setHitReRoll(e.target.value as any)}>
+                    <select className="input-control" value={hitReRoll} onChange={(e) => setHitReRoll(e.target.value as 'none' | 'ones' | 'all')}>
                       <option value="none">No Re-rolls</option>
                       <option value="ones">Re-roll 1s</option>
                       <option value="all">Re-roll All Fails</option>
@@ -439,7 +442,7 @@ export const DeepAnalysis: React.FC = () => {
                   </div>
                   <div className="input-group">
                     <label>Wound Re-rolls</label>
-                    <select className="input-control" value={woundReRoll} onChange={(e) => setWoundReRoll(e.target.value as any)}>
+                    <select className="input-control" value={woundReRoll} onChange={(e) => setWoundReRoll(e.target.value as 'none' | 'ones' | 'all')}>
                       <option value="none">No Re-rolls</option>
                       <option value="ones">Re-roll 1s</option>
                       <option value="all">Re-roll All Fails</option>
@@ -481,7 +484,7 @@ export const DeepAnalysis: React.FC = () => {
                       className="input-control"
                       style={{ width: '180px', padding: '0.3rem' }}
                       value={selectedTargetPreset}
-                      onChange={(e) => setSelectedTargetPreset(e.target.value)}
+                      onChange={(e) => applyTargetPreset(e.target.value)}
                     >
                       <option value="GEQ">Preset: GEQ (Guard)</option>
                       <option value="MEQ">Preset: MEQ (Marine)</option>
@@ -625,7 +628,7 @@ export const DeepAnalysis: React.FC = () => {
                     <select
                       className="input-control"
                       value={effMetric}
-                      onChange={(e: any) => setEffMetric(e.target.value)}
+                      onChange={(e) => setEffMetric(e.target.value as 'wounds' | 'oc' | 'damage')}
                     >
                       <option value="wounds">Wounds / 100 Pts</option>
                       <option value="oc">OC / 100 Pts</option>
@@ -661,10 +664,10 @@ export const DeepAnalysis: React.FC = () => {
                 </div>
               ) : (
                 <div className="custom-bar-chart">
-                  {effRankings.slice(0, 15).map((item: any) => {
-                    let fillPercent = 0;
-                    let valueDisplay = "";
-                    let fillGradient = "";
+                  {effRankings.slice(0, 15).map((item) => {
+                    let fillPercent: number;
+                    let valueDisplay: string;
+                    let fillGradient: string;
 
                     if (effMetric === 'wounds') {
                       fillPercent = Math.min(100, (item.woundsPer100 / 25) * 100);

@@ -140,9 +140,10 @@ export const query = async (sql: string, params: (string | number | boolean | nu
     }
     stmt.free();
     return rows;
-  } catch (err: any) {
+  } catch (err) {
     console.error(`[SQL Error] Query failed: "${sql}"`, err);
-    throw new Error(`Database query failed: ${err.message || err}. Query: ${sql.slice(0, 100)}${sql.length > 100 ? '...' : ''}`);
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Database query failed: ${message}. Query: ${sql.slice(0, 100)}${sql.length > 100 ? '...' : ''}`, { cause: err });
   }
 };
 

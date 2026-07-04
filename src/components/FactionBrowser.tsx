@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Shield, Sparkles, AlertCircle, RefreshCw, BarChart2, Info, Compass, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { loadAndMergeFaction, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
-import type { MergedUnit } from '../types/data';
+import type { MergedUnit, WeaponProfile } from '../types/data';
 
 interface FactionBrowserProps {
   factionSlug: string;
@@ -930,8 +930,8 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
 
                     const unitPts = unit.pointsRange.min;
 
-                    const ranged: { name: string; prof: any }[] = [];
-                    const melee: { name: string; prof: any }[] = [];
+                    const ranged: { name: string; prof: WeaponProfile }[] = [];
+                    const melee: { name: string; prof: WeaponProfile }[] = [];
 
                     ds.models.forEach(m => {
                       m.weapons?.forEach(w => {

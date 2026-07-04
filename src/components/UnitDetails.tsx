@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { X, Shield, Target, BookOpen } from 'lucide-react';
 import type { MergedUnit, Weapon, WeaponProfile } from '../types/data';
 import { calculateExpectedDamage, TARGET_PRESETS } from '../utils/mathhammer';
@@ -17,30 +17,18 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
   const [viewMode, setViewMode] = useState<'tactical' | 'datasheet'>('tactical');
 
 
-  // Selected weapon for mathhammer calculations
-  const [selectedWeapon, setSelectedWeapon] = useState<Weapon | null>(null);
-  const [selectedProfile, setSelectedProfile] = useState<WeaponProfile | null>(null);
+  // Selected weapon for mathhammer calculations, defaulting to the first
+  // weapon of the first armed model. (App keys this component by unit slug,
+  // so state resets when the displayed unit changes.)
+  const firstWeapon = datasheet?.models?.find(m => m.weapons && m.weapons.length > 0)?.weapons[0] || null;
+  const [selectedWeapon, setSelectedWeapon] = useState<Weapon | null>(firstWeapon);
+  const [selectedProfile, setSelectedProfile] = useState<WeaponProfile | null>(firstWeapon?.profiles?.[0] || null);
 
   // Custom modifiers for mathhammer calculations
   const [hitReRoll, setHitReRoll] = useState<'none' | 'ones' | 'all'>('none');
   const [woundReRoll, setWoundReRoll] = useState<'none' | 'ones' | 'all'>('none');
   const [plusToHit, setPlusToHit] = useState<number>(0);
   const [plusToWound, setPlusToWound] = useState<number>(0);
-
-  // Initialize with the first weapon/profile if available
-  useEffect(() => {
-    if (datasheet?.models) {
-      // Find the first model with weapons
-      const modelWithWeapons = datasheet.models.find(m => m.weapons && m.weapons.length > 0);
-      if (modelWithWeapons && modelWithWeapons.weapons.length > 0) {
-        const weapon = modelWithWeapons.weapons[0];
-        setSelectedWeapon(weapon);
-        if (weapon.profiles && weapon.profiles.length > 0) {
-          setSelectedProfile(weapon.profiles[0]);
-        }
-      }
-    }
-  }, [datasheet]);
 
   if (!datasheet) {
     return (
@@ -663,7 +651,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                         <select
                           className="input-control"
                           value={hitReRoll}
-                          onChange={(e) => setHitReRoll(e.target.value as any)}
+                          onChange={(e) => setHitReRoll(e.target.value as 'none' | 'ones' | 'all')}
                         >
                           <option value="none">No Re-rolls</option>
                           <option value="ones">Re-roll 1s</option>
@@ -676,7 +664,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                         <select
                           className="input-control"
                           value={woundReRoll}
-                          onChange={(e) => setWoundReRoll(e.target.value as any)}
+                          onChange={(e) => setWoundReRoll(e.target.value as 'none' | 'ones' | 'all')}
                         >
                           <option value="none">No Re-rolls</option>
                           <option value="ones">Re-roll 1s</option>

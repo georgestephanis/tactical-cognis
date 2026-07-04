@@ -262,7 +262,7 @@ export function getExpectedDamageForExpression(
       baseDmg = Math.max(1, baseDmg - damageReduction);
     }
     
-    let expectedDmg = 0;
+    let expectedDmg: number;
     if (fnpFailChance >= 1.0) {
       // No FNP: cap by target model wounds, accounting for steady-state wastage over multiple attacks
       const bk = targetWounds / Math.ceil(targetWounds / baseDmg);
@@ -333,8 +333,8 @@ export function calculateExpectedDamage(
   }
 
   // 2. Resolve Hits
-  let expectedHits = 0;
-  let lethalWounds = 0; // Hits that auto-wound due to Lethal Hits
+  let expectedHits: number;
+  let lethalWounds: number; // Hits that auto-wound due to Lethal Hits
   
   if (input.torrent) {
     // Torrent auto-hits
@@ -406,7 +406,7 @@ export function calculateExpectedDamage(
 
   // 3. Resolve Wounds
   // Determine base wound roll required
-  let baseWoundReq = 4;
+  let baseWoundReq: number;
   if (input.strength >= target.t * 2) {
     baseWoundReq = 2;
   } else if (input.strength > target.t) {
@@ -459,8 +459,8 @@ export function calculateExpectedDamage(
   const normalWounds = expectedHits * normalWoundChance;
   const critWounds = expectedHits * critWoundChance;
 
-  let devastatingWoundsCount = 0;
-  let savePool = 0;
+  let devastatingWoundsCount: number;
+  let savePool: number;
 
   if (input.devastatingWounds) {
     // Critical wounds bypass saves (11th Edition Devastating Wounds: no spillover, bypasses saves, MW FNP applies)

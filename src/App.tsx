@@ -264,6 +264,7 @@ function App() {
       {/* Unit Detail Overlay Modal */}
       {activeUnit && (
         <UnitDetails
+          key={activeUnit.slug}
           unit={activeUnit}
           onClose={() => setActiveUnit(null)}
         />

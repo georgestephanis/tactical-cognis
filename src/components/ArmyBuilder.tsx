@@ -136,7 +136,7 @@ function findFactionSlugByName(rosterHeaderLine: string): { slug: string; name: 
   return null;
 }
 
-export function parseBattleForgeText(text: string): ParsedRoster {
+function parseBattleForgeText(text: string): ParsedRoster {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
   const parsed: ParsedRoster = {
@@ -150,7 +150,7 @@ export function parseBattleForgeText(text: string): ParsedRoster {
 
   if (lines.length === 0) return parsed;
 
-  let headerIndex = -1;
+  let headerIndex: number;
   const signatureIndex = lines.findIndex(l => l.toUpperCase().includes('EXPORTED FROM THE WARHAMMER'));
 
   if (signatureIndex !== -1) {
@@ -247,6 +247,11 @@ export function parseBattleForgeText(text: string): ParsedRoster {
   return parsed;
 }
 
+// Module-level so the impure calls stay out of render scope (react-hooks/purity).
+function makeRosterUnitId(slug: string): string {
+  return `${slug}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 interface ArmyBuilderProps {
   initialFactionSlug?: string;
   onSelectFaction?: (slug: string) => void;
@@ -266,10 +271,19 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const [factionData, setFactionData] = useState<MergedFaction | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [catalogRole, setCatalogRole] = useState<string>('all');
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   // Roster persistence and printing states
-  const [savedArmies, setSavedArmies] = useState<ArmyList[]>([]);
+  const [savedArmies, setSavedArmies] = useState<ArmyList[]>(() => {
+    const raw = localStorage.getItem('tactical_cognis_armies');
+    if (raw) {
+      try {
+        return JSON.parse(raw) as ArmyList[];
+      } catch (err) {
+        console.error('Failed to load saved armies from localStorage:', err);
+      }
+    }
+    return [];
+  });
   const [currentListName, setCurrentListName] = useState<string>('My Roster');
   const [listNameToSave, setListNameToSave] = useState<string>('');
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState<boolean>(false);
@@ -278,20 +292,6 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // Import states
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [importText, setImportText] = useState<string>('');
-  const [pendingImport, setPendingImport] = useState<ParsedRoster | null>(null);
-
-  // Load saved rosters from localStorage on component mount
-  useEffect(() => {
-    const raw = localStorage.getItem('tactical_cognis_armies');
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as ArmyList[];
-        setSavedArmies(parsed);
-      } catch (err) {
-        console.error('Failed to load saved armies from localStorage:', err);
-      }
-    }
-  }, []);
 
   const handleSaveRoster = () => {
     if (!selectedFactionSlug || !factionData) return;
@@ -354,14 +354,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }
   };
 
-  // Load faction data when slug changes
+  // Load faction data when slug changes.
+  // (Clearing roster/detachment/data on deselect happens in the change handlers.)
   useEffect(() => {
-    if (!selectedFactionSlug) {
-      setFactionData(null);
-      setRoster([]);
-      setSelectedDetachmentSlug(null);
-      return;
-    }
+    if (!selectedFactionSlug) return;
 
     async function fetchData() {
       setLoading(true);
@@ -379,101 +375,12 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     fetchData();
   }, [selectedFactionSlug]);
 
-  // Apply pending import when faction data completes loading
-  useEffect(() => {
-    if (pendingImport && factionData && !loading) {
-      if (factionData.slug === pendingImport.factionSlug) {
-        applyParsedRoster(pendingImport, factionData);
-        setPendingImport(null);
-      }
-    }
-  }, [pendingImport, factionData, loading]);
-
   // Sync parent state if callback provided
   useEffect(() => {
     if (selectedFactionSlug && onSelectFaction) {
       onSelectFaction(selectedFactionSlug);
     }
   }, [selectedFactionSlug, onSelectFaction]);
-
-  // Compute validation errors in real-time
-  useEffect(() => {
-    if (!factionData) return;
-
-    const errors: string[] = [];
-    const totalPoints = calculateTotalPoints();
-
-    // 1. Points limit check
-    if (totalPoints > pointLimit) {
-      errors.push(`Roster exceeds point limit: ${totalPoints} / ${pointLimit} pts.`);
-    }
-
-    // 2. Warlord check
-    const characters = roster.filter(u => u.isCharacter);
-    const warlords = roster.filter(u => u.isWarlord);
-    if (characters.length > 0 && warlords.length === 0) {
-      errors.push("No Warlord designated. Every army must have exactly one Warlord character.");
-    } else if (warlords.length > 1) {
-      errors.push(`Multiple Warlords designated (${warlords.length}). You may only have one Warlord.`);
-    }
-
-    // 3. Rule of 3 (Datasheet counts)
-    const datasheetCounts: Record<string, number> = {};
-    roster.forEach(u => {
-      datasheetCounts[u.name] = (datasheetCounts[u.name] || 0) + 1;
-    });
-
-    Object.entries(datasheetCounts).forEach(([name, count]) => {
-      // Find one matching unit to determine if it is battleline
-      const matchedUnit = roster.find(u => u.name === name);
-      const limit = matchedUnit?.isBattleline ? 6 : 3;
-      if (count > limit) {
-        errors.push(`Exceeded allowance for "${name}": added ${count} copies (Max is ${limit} for ${matchedUnit?.isBattleline ? 'Battleline' : 'standard'} units).`);
-      }
-    });
-
-    // 4. Enhancements checks
-    const enhancedUnits = roster.filter(u => u.enhancementName);
-    if (enhancedUnits.length > 3) {
-      errors.push(`Exceeded detachment enhancement limits: selected ${enhancedUnits.length} enhancements (Max is 3).`);
-    }
-
-    const seenEnhancements = new Set<string>();
-    enhancedUnits.forEach(u => {
-      if (u.enhancementName) {
-        if (seenEnhancements.has(u.enhancementName)) {
-          errors.push(`Duplicate enhancement selected: "${u.enhancementName}" is assigned to multiple units.`);
-        }
-        seenEnhancements.add(u.enhancementName);
-
-        // Cannot be Warlord enhancement restriction
-        if (u.isWarlord) {
-          const matchedDet = factionData.detachments.find(d => d.slug === selectedDetachmentSlug);
-          const matchedEnh = matchedDet?.enhancements.find(e => e.name === u.enhancementName);
-          if (matchedEnh?.cannotBeWarlord) {
-            errors.push(`Invalid Enhancement: "${u.enhancementName}" cannot be given to your Warlord.`);
-          }
-        }
-      }
-    });
-
-    // 5. Leader compatibility checks
-    roster.forEach(u => {
-      if (u.isCharacter && u.attachedToId) {
-        const targetBodyguard = roster.find(t => t.id === u.attachedToId);
-        if (!targetBodyguard) {
-          errors.push(`Attached leader "${u.name}" points to a bodyguard squad that no longer exists.`);
-        } else {
-          const isComp = checkCompatibility(u, targetBodyguard);
-          if (!isComp) {
-            errors.push(`Compatibility mismatch: Leader character "${u.name}" cannot attach to "${targetBodyguard.name}".`);
-          }
-        }
-      }
-    });
-
-    setValidationErrors(errors);
-  }, [roster, pointLimit, selectedDetachmentSlug, factionData]);
 
   // Check character compatibility with bodyguard squad
   const checkCompatibility = (character: RosterUnit, bodyguard: RosterUnit): boolean => {
@@ -578,7 +485,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       }
 
       newRosterUnits.push({
-        id: `${matchedUnit.slug}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: makeRosterUnitId(matchedUnit.slug),
         unitSlug: matchedUnit.slug,
         name: matchedUnit.name,
         points: actualPoints,
@@ -611,6 +518,22 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }
   };
 
+  // Switch faction and apply an imported roster once its data is loaded.
+  const importIntoFaction = async (parsed: ParsedRoster, slug: string) => {
+    setSelectedFactionSlug(slug);
+    setIsImportModalOpen(false);
+    setImportText('');
+    try {
+      const data = await loadAndMergeFaction(slug);
+      if (data) {
+        applyParsedRoster(parsed, data);
+      }
+    } catch (err) {
+      console.error('Failed to load faction data for import:', err);
+      alert('Failed to load faction data for the imported roster.');
+    }
+  };
+
   const handleImportExecute = () => {
     if (!importText.trim()) return;
 
@@ -630,10 +553,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         );
 
         if (confirmSwitch) {
-          setPendingImport(parsed);
-          setSelectedFactionSlug(parsed.factionSlug);
-          setIsImportModalOpen(false);
-          setImportText('');
+          importIntoFaction(parsed, parsed.factionSlug);
         }
       } else {
         if (factionData) {
@@ -642,10 +562,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           setImportText('');
         } else {
           if (parsed.factionSlug) {
-            setPendingImport(parsed);
-            setSelectedFactionSlug(parsed.factionSlug);
-            setIsImportModalOpen(false);
-            setImportText('');
+            importIntoFaction(parsed, parsed.factionSlug);
           } else {
             alert("Please select a faction workspace before importing a roster with no detected faction.");
           }
@@ -678,7 +595,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }
 
     const newUnit: RosterUnit = {
-      id: `${mergedUnit.slug}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: makeRosterUnitId(mergedUnit.slug),
       unitSlug: mergedUnit.slug,
       name: mergedUnit.name,
       points: initialCost,
@@ -802,6 +719,79 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const totalPoints = calculateTotalPoints();
   const pointPercentage = Math.min(100, (totalPoints / pointLimit) * 100);
 
+  // Roster validation, derived directly from current state on each render
+  const validationErrors: string[] = [];
+  if (factionData) {
+    // 1. Points limit check
+    if (totalPoints > pointLimit) {
+      validationErrors.push(`Roster exceeds point limit: ${totalPoints} / ${pointLimit} pts.`);
+    }
+
+    // 2. Warlord check
+    const characters = roster.filter(u => u.isCharacter);
+    const warlords = roster.filter(u => u.isWarlord);
+    if (characters.length > 0 && warlords.length === 0) {
+      validationErrors.push("No Warlord designated. Every army must have exactly one Warlord character.");
+    } else if (warlords.length > 1) {
+      validationErrors.push(`Multiple Warlords designated (${warlords.length}). You may only have one Warlord.`);
+    }
+
+    // 3. Rule of 3 (Datasheet counts)
+    const datasheetCounts: Record<string, number> = {};
+    roster.forEach(u => {
+      datasheetCounts[u.name] = (datasheetCounts[u.name] || 0) + 1;
+    });
+
+    Object.entries(datasheetCounts).forEach(([name, count]) => {
+      // Find one matching unit to determine if it is battleline
+      const matchedUnit = roster.find(u => u.name === name);
+      const limit = matchedUnit?.isBattleline ? 6 : 3;
+      if (count > limit) {
+        validationErrors.push(`Exceeded allowance for "${name}": added ${count} copies (Max is ${limit} for ${matchedUnit?.isBattleline ? 'Battleline' : 'standard'} units).`);
+      }
+    });
+
+    // 4. Enhancements checks
+    const enhancedUnits = roster.filter(u => u.enhancementName);
+    if (enhancedUnits.length > 3) {
+      validationErrors.push(`Exceeded detachment enhancement limits: selected ${enhancedUnits.length} enhancements (Max is 3).`);
+    }
+
+    const seenEnhancements = new Set<string>();
+    enhancedUnits.forEach(u => {
+      if (u.enhancementName) {
+        if (seenEnhancements.has(u.enhancementName)) {
+          validationErrors.push(`Duplicate enhancement selected: "${u.enhancementName}" is assigned to multiple units.`);
+        }
+        seenEnhancements.add(u.enhancementName);
+
+        // Cannot be Warlord enhancement restriction
+        if (u.isWarlord) {
+          const matchedDet = factionData.detachments.find(d => d.slug === selectedDetachmentSlug);
+          const matchedEnh = matchedDet?.enhancements.find(e => e.name === u.enhancementName);
+          if (matchedEnh?.cannotBeWarlord) {
+            validationErrors.push(`Invalid Enhancement: "${u.enhancementName}" cannot be given to your Warlord.`);
+          }
+        }
+      }
+    });
+
+    // 5. Leader compatibility checks
+    roster.forEach(u => {
+      if (u.isCharacter && u.attachedToId) {
+        const targetBodyguard = roster.find(t => t.id === u.attachedToId);
+        if (!targetBodyguard) {
+          validationErrors.push(`Attached leader "${u.name}" points to a bodyguard squad that no longer exists.`);
+        } else {
+          const isComp = checkCompatibility(u, targetBodyguard);
+          if (!isComp) {
+            validationErrors.push(`Compatibility mismatch: Leader character "${u.name}" cannot attach to "${targetBodyguard.name}".`);
+          }
+        }
+      }
+    });
+  }
+
   // Helper selectors
   const bodyguardsInRoster = roster.filter(u => !u.isCharacter);
   const independentCharacters = roster.filter(u => u.isCharacter && !u.attachedToId);
@@ -834,9 +824,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
             <select
               value={selectedFactionSlug || ''}
               onChange={(e) => {
-                setSelectedFactionSlug(e.target.value || null);
+                const slug = e.target.value || null;
+                setSelectedFactionSlug(slug);
                 setRoster([]);
                 setSelectedDetachmentSlug(null);
+                if (!slug) setFactionData(null);
               }}
               style={{
                 background: 'var(--bg-tertiary)',
