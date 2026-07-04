@@ -107,7 +107,8 @@ the shape doesn't.
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `detachment` | 290 | `name`, **`detachmentPointsCost` (INTEGER)**, `isCombatPatrol`, `publicationId` |
+| `detachment` | 290 | `name`, **`detachmentPointsCost` (INTEGER)** — the base DP cost (1–3), `isCombatPatrol`, `publicationId` |
+| `detachment_faction_detachment_points_cost` | ~4 | per-faction DP-cost **overrides**: `(detachmentId, factionKeywordId)` composite PK + `detachmentPointsCost`. When a detachment costs different DP for a specific faction, the override wins — `COALESCE(override, base)` |
 | `detachment_rule` | — | `name`, `detachmentId`; rule text hangs off `rule_container_component.detachmentRuleId` |
 | `detachment_faction_keyword` | — | which faction(s) a detachment belongs to |
 | `detachment_unique_keyword` | — | keyword uniqueness restrictions within the detachment |
@@ -135,7 +136,11 @@ the shape doesn't.
   `primary_mission_objective` → `primary_mission_objective_scoring` (`victoryPoints`,
   `isCumulative`); `secondary_mission*` mirrors it; plus `force_disposition*`,
   `mission_pack`, `mission_layout*`, `mission_deployment`, `mission_twist`,
-  `battle_size`, `mission_preset`.
+  `mission_preset`.
+- **Game sizes**: `battle_size` (3 rows) — `name`, `pointsLimit`, and the army
+  construction limits for that size: `detachmentPointsLimit`, `enhancementLimit`,
+  `duplicateUnitLimit`. The authoritative source for "how many detachment points /
+  enhancements / duplicate datasheets at this game size".
 - **Publications & FAQ:** `publication` (~69) — most entities carry `publicationId`;
   `faq` / `faq_config` hold errata with text inline.
 
@@ -153,7 +158,8 @@ All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
 |---|---|
 | Faction list (`getFactionList`) | `faction_keyword`, `datasheet_faction_keyword`, `detachment_faction_keyword` |
 | Units per faction (`getUnitsByFaction`) | `datasheet`, `publication`, `datasheet_faction_keyword`, `miniature`, `miniature_keyword`, `keyword`, `unit_composition(_miniature)`, `datasheet_points_step`, `datasheet_datasheet_ability`, `datasheet_ability`, `datasheet_bodyguard_group(_datasheet/_keyword)`, `wargear_item`, `wargear_item_profile`, `wargear_item_profile_wargear_ability`, `wargear_ability`, `base_miniature_loadout(_wargear_option)`, `wargear_option` |
-| Detachments per faction (`getDetachmentsByFaction`) | `detachment`, `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement`, `stratagem`, `detachment_unique_keyword` |
+| Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement`, `stratagem`, `detachment_unique_keyword` |
+| Army Builder game-size limits (`getBattleSizes`) | `battle_size` |
 | Dashboard stats (`getDbStats`) | `metadata` + row counts of the headline tables |
 
 Meta-factions (umbrella keywords that span several sub-faction keywords) are expanded
@@ -161,8 +167,9 @@ in code via `META_FACTION_MAP` in `db.ts`, then widened by following datasheets 
 carry both a parent and child faction keyword.
 
 Notably **unused so far**: `datasheet_damage` (damaged-vehicle brackets),
-`invulnerable_save`, `loadout_choice*` (swap options), `wargear_limit*`, the entire
-missions family, `allied_faction*`, and `faq`. All candidates for future features.
+`invulnerable_save`, `loadout_choice*` (swap options), `wargear_limit*`, the missions
+family (other than `battle_size`), `allied_faction*`, and `faq`. All candidates for
+future features.
 
 ## Useful query shapes
 

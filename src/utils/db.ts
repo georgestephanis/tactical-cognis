@@ -467,12 +467,18 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
 
   const idList = kwIds.map(id => `'${id}'`).join(',');
 
+  // detachment_faction_detachment_points_cost holds rare per-faction DP-cost
+  // overrides; prefer one scoped to a faction keyword in play over the base cost.
   const detachments = await query(`
-    SELECT DISTINCT
-      det.id, det.name, det.detachmentPointsCost, det.isCombatPatrol
+    SELECT
+      det.id, det.name, det.isCombatPatrol,
+      COALESCE(MIN(ovr.detachmentPointsCost), det.detachmentPointsCost) AS detachmentPointsCost
     FROM detachment det
     JOIN detachment_faction_keyword dfk ON det.id = dfk.detachmentId
+    LEFT JOIN detachment_faction_detachment_points_cost ovr
+      ON ovr.detachmentId = det.id AND ovr.factionKeywordId = dfk.factionKeywordId
     WHERE dfk.factionKeywordId IN (${idList})
+    GROUP BY det.id
   `);
 
   if (detachments.length === 0) return [];
@@ -571,6 +577,32 @@ export const getFactionList = async () => {
   const blacklist = ['asuryani', 'harlequins', 'ynnari', 'legiones-daemonica', 'heretic-astartes', 'blood-legions', 'plague-legions', 'scintillating-legions', 'legions-of-excess'];
 
   return results.filter(f => f !== null && !blacklist.includes(f.slug)) as { faction: string; slug: string; units: number; detachments: number }[];
+};
+
+export interface BattleSize {
+  name: string;
+  pointsLimit: number;
+  detachmentPointsLimit: number;
+  enhancementLimit: number;
+  duplicateUnitLimit: number;
+}
+
+/**
+ * Per-game-size army construction limits, smallest game first.
+ */
+export const getBattleSizes = async (): Promise<BattleSize[]> => {
+  const rows = await query(`
+    SELECT name, pointsLimit, detachmentPointsLimit, enhancementLimit, duplicateUnitLimit
+    FROM battle_size
+    ORDER BY pointsLimit
+  `);
+  return rows.map(r => ({
+    name: String(r.name),
+    pointsLimit: Number(r.pointsLimit),
+    detachmentPointsLimit: Number(r.detachmentPointsLimit),
+    enhancementLimit: Number(r.enhancementLimit),
+    duplicateUnitLimit: Number(r.duplicateUnitLimit),
+  }));
 };
 
 export const getDbStats = async () => {

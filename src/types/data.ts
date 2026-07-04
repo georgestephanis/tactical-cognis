@@ -184,8 +184,10 @@ export interface ArmyList {
   name: string;
   factionSlug: string;
   factionName: string;
-  detachmentSlug: string | null;
-  detachmentName: string | null;
+  detachmentSlugs: string[];
   pointLimit: number;
   units: RosterUnit[];
+  /** Legacy single-detachment fields from older saves; migrated to detachmentSlugs on load. */
+  detachmentSlug?: string | null;
+  detachmentName?: string | null;
 }

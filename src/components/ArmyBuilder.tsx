@@ -15,7 +15,9 @@ import {
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
-import type { RosterUnit, MergedUnit, ArmyList, Weapon } from '../types/data';
+import { getBattleSizes } from '../utils/db';
+import type { BattleSize } from '../utils/db';
+import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon } from '../types/data';
 
 const FACTION_NAMES: Record<string, string> = {
   'adepta-sororitas': 'Adepta Sororitas',
@@ -262,7 +264,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   onSelectFaction
 }) => {
   const [selectedFactionSlug, setSelectedFactionSlug] = useState<string | null>(initialFactionSlug || null);
-  const [selectedDetachmentSlug, setSelectedDetachmentSlug] = useState<string | null>(null);
+  const [selectedDetachmentSlugs, setSelectedDetachmentSlugs] = useState<string[]>([]);
+  const [battleSizes, setBattleSizes] = useState<BattleSize[]>([]);
   const [roster, setRoster] = useState<RosterUnit[]>([]);
   const [pointLimit, setPointLimit] = useState<number>(2000);
   const [customLimitInput, setCustomLimitInput] = useState<string>('2000');
@@ -277,13 +280,25 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     const raw = localStorage.getItem('tactical_cognis_armies');
     if (raw) {
       try {
-        return JSON.parse(raw) as ArmyList[];
+        const parsed = JSON.parse(raw) as ArmyList[];
+        // Migrate legacy single-detachment saves to the detachmentSlugs array
+        return parsed.map(a => ({
+          ...a,
+          detachmentSlugs: a.detachmentSlugs ?? (a.detachmentSlug ? [a.detachmentSlug] : []),
+        }));
       } catch (err) {
         console.error('Failed to load saved armies from localStorage:', err);
       }
     }
     return [];
   });
+
+  // Per-game-size construction limits from the DB (detachment points, enhancements, duplicates)
+  useEffect(() => {
+    getBattleSizes()
+      .then(setBattleSizes)
+      .catch(err => console.error('Failed to load battle sizes:', err));
+  }, []);
   const [currentListName, setCurrentListName] = useState<string>('My Roster');
   const [listNameToSave, setListNameToSave] = useState<string>('');
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState<boolean>(false);
@@ -297,14 +312,12 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     if (!selectedFactionSlug || !factionData) return;
 
     const nameToUse = listNameToSave.trim() || currentListName.trim() || 'My Roster';
-    const matchedDet = factionData.detachments.find(d => d.slug === selectedDetachmentSlug);
 
     const newArmy: ArmyList = {
       name: nameToUse,
       factionSlug: selectedFactionSlug,
       factionName: factionData.factionName,
-      detachmentSlug: selectedDetachmentSlug,
-      detachmentName: matchedDet ? matchedDet.name : null,
+      detachmentSlugs: selectedDetachmentSlugs,
       pointLimit,
       units: roster
     };
@@ -332,7 +345,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     if (!army) return;
 
     setSelectedFactionSlug(army.factionSlug);
-    setSelectedDetachmentSlug(army.detachmentSlug);
+    setSelectedDetachmentSlugs(army.detachmentSlugs);
     setPointLimit(army.pointLimit);
     setCustomLimitInput(army.pointLimit.toString());
     setIsCustomLimit(![1000, 2000, 3000].includes(army.pointLimit));
@@ -411,11 +424,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         }
       }
     }
-    if (matchedDetachmentSlug) {
-      setSelectedDetachmentSlug(matchedDetachmentSlug);
-    } else {
-      setSelectedDetachmentSlug(null);
-    }
+    setSelectedDetachmentSlugs(matchedDetachmentSlug ? [matchedDetachmentSlug] : []);
 
     const newRosterUnits: RosterUnit[] = [];
     const warnings: string[] = [];
@@ -662,11 +671,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }));
   };
 
-  // Set enhancement on character
+  // Set enhancement on character (searched across every selected detachment)
   const handleSelectEnhancement = (id: string, enhName: string) => {
-    if (!factionData || !selectedDetachmentSlug) return;
-    const matchedDet = factionData.detachments.find(d => d.slug === selectedDetachmentSlug);
-    const enhancement = matchedDet?.enhancements.find(e => e.name === enhName);
+    if (!factionData || selectedDetachmentSlugs.length === 0) return;
+    const enhancement = factionData.detachments
+      .filter(d => selectedDetachmentSlugs.includes(d.slug))
+      .flatMap(d => d.enhancements)
+      .find(e => e.name === enhName);
 
     setRoster(prev => prev.map(u => {
       if (u.id !== id) return u;
@@ -676,6 +687,26 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         enhancementPoints: enhName !== 'none' ? (enhancement?.pointsCost || 0) : undefined
       };
     }));
+  };
+
+  // Add a detachment to the army (budget enforcement happens in the UI + validation)
+  const handleAddDetachment = (slug: string) => {
+    if (!slug || selectedDetachmentSlugs.includes(slug)) return;
+    setSelectedDetachmentSlugs(prev => [...prev, slug]);
+  };
+
+  // Remove a detachment and clear any roster enhancements that came from it
+  const handleRemoveDetachment = (slug: string) => {
+    setSelectedDetachmentSlugs(prev => prev.filter(s => s !== slug));
+    const removed = factionData?.detachments.find(d => d.slug === slug);
+    const removedEnhNames = new Set((removed?.enhancements || []).map(e => e.name));
+    if (removedEnhNames.size > 0) {
+      setRoster(prev => prev.map(u =>
+        u.enhancementName && removedEnhNames.has(u.enhancementName)
+          ? { ...u, enhancementName: undefined, enhancementPoints: undefined }
+          : u
+      ));
+    }
   };
 
   // Attach leader to bodyguard
@@ -719,12 +750,34 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const totalPoints = calculateTotalPoints();
   const pointPercentage = Math.min(100, (totalPoints / pointLimit) * 100);
 
+  // Battle-size limits for the chosen point limit: the smallest game size that
+  // fits it, else the largest. Fallbacks match Strike Force if the table is
+  // missing from an uploaded database.
+  const applicableBattleSize = battleSizes.length > 0
+    ? (battleSizes.find(b => pointLimit <= b.pointsLimit) || battleSizes[battleSizes.length - 1])
+    : null;
+  const detachmentPointsLimit = applicableBattleSize?.detachmentPointsLimit ?? 3;
+  const enhancementLimit = applicableBattleSize?.enhancementLimit ?? 3;
+  const duplicateUnitLimit = applicableBattleSize?.duplicateUnitLimit ?? 3;
+
+  const selectedDetachments = factionData
+    ? selectedDetachmentSlugs
+        .map(slug => factionData.detachments.find(d => d.slug === slug))
+        .filter((d): d is MergedDetachment => !!d)
+    : [];
+  const usedDetachmentPoints = selectedDetachments.reduce((sum, d) => sum + (d.detachmentPointsCost || 0), 0);
+
   // Roster validation, derived directly from current state on each render
   const validationErrors: string[] = [];
   if (factionData) {
     // 1. Points limit check
     if (totalPoints > pointLimit) {
       validationErrors.push(`Roster exceeds point limit: ${totalPoints} / ${pointLimit} pts.`);
+    }
+
+    // 1b. Detachment points budget for the game size
+    if (usedDetachmentPoints > detachmentPointsLimit) {
+      validationErrors.push(`Detachment points exceeded: selected detachments total ${usedDetachmentPoints} DP (limit is ${detachmentPointsLimit}${applicableBattleSize ? ` for ${applicableBattleSize.name}` : ''}).`);
     }
 
     // 2. Warlord check
@@ -743,9 +796,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     });
 
     Object.entries(datasheetCounts).forEach(([name, count]) => {
-      // Find one matching unit to determine if it is battleline
+      // Find one matching unit to determine if it is battleline (battleline may take double)
       const matchedUnit = roster.find(u => u.name === name);
-      const limit = matchedUnit?.isBattleline ? 6 : 3;
+      const limit = matchedUnit?.isBattleline ? duplicateUnitLimit * 2 : duplicateUnitLimit;
       if (count > limit) {
         validationErrors.push(`Exceeded allowance for "${name}": added ${count} copies (Max is ${limit} for ${matchedUnit?.isBattleline ? 'Battleline' : 'standard'} units).`);
       }
@@ -753,8 +806,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     // 4. Enhancements checks
     const enhancedUnits = roster.filter(u => u.enhancementName);
-    if (enhancedUnits.length > 3) {
-      validationErrors.push(`Exceeded detachment enhancement limits: selected ${enhancedUnits.length} enhancements (Max is 3).`);
+    if (enhancedUnits.length > enhancementLimit) {
+      validationErrors.push(`Exceeded enhancement limit: selected ${enhancedUnits.length} enhancements (Max is ${enhancementLimit}${applicableBattleSize ? ` for ${applicableBattleSize.name}` : ''}).`);
     }
 
     const seenEnhancements = new Set<string>();
@@ -765,10 +818,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         }
         seenEnhancements.add(u.enhancementName);
 
-        // Cannot be Warlord enhancement restriction
+        // Cannot be Warlord enhancement restriction (search every selected detachment)
         if (u.isWarlord) {
-          const matchedDet = factionData.detachments.find(d => d.slug === selectedDetachmentSlug);
-          const matchedEnh = matchedDet?.enhancements.find(e => e.name === u.enhancementName);
+          const matchedEnh = selectedDetachments
+            .flatMap(d => d.enhancements)
+            .find(e => e.name === u.enhancementName);
           if (matchedEnh?.cannotBeWarlord) {
             validationErrors.push(`Invalid Enhancement: "${u.enhancementName}" cannot be given to your Warlord.`);
           }
@@ -827,7 +881,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 const slug = e.target.value || null;
                 setSelectedFactionSlug(slug);
                 setRoster([]);
-                setSelectedDetachmentSlug(null);
+                setSelectedDetachmentSlugs([]);
                 if (!slug) setFactionData(null);
               }}
               style={{
@@ -957,34 +1011,61 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           <div className="points-gauge">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
 
-              {/* Detachment Selector */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: '280px' }}>
-                <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Detachment:</span>
-                <select
-                  value={selectedDetachmentSlug || ''}
-                  onChange={(e) => {
-                    setSelectedDetachmentSlug(e.target.value || null);
-                    // Reset all enhancements in current roster if detachment changes
-                    setRoster(prev => prev.map(u => ({ ...u, enhancementName: undefined, enhancementPoints: undefined })));
-                  }}
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--glass-border)',
-                    borderRadius: '8px',
-                    padding: '0.5rem 1rem',
-                    fontSize: '0.9rem',
-                    flex: 1,
-                    cursor: 'pointer'
-                  }}
-                >
-                  <option value="">-- Select Detachment --</option>
-                  {factionData.detachments.filter(d => !d.isCombatPatrol).map(d => (
-                    <option key={d.slug} value={d.slug}>
-                      {d.name} {d.isFactionPack ? '(Faction Pack)' : ''}
-                    </option>
-                  ))}
-                </select>
+              {/* Detachment Selector — multiple detachments, budgeted by detachment points */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: '280px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Detachments:</span>
+                  <select
+                    value=""
+                    onChange={(e) => handleAddDetachment(e.target.value)}
+                    style={{
+                      background: 'var(--bg-tertiary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: '8px',
+                      padding: '0.5rem 1rem',
+                      fontSize: '0.9rem',
+                      flex: 1,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="">-- Add Detachment --</option>
+                    {factionData.detachments.filter(d => !d.isCombatPatrol && !selectedDetachmentSlugs.includes(d.slug)).map(d => {
+                      const cost = d.detachmentPointsCost || 0;
+                      const overBudget = usedDetachmentPoints + cost > detachmentPointsLimit;
+                      return (
+                        <option key={d.slug} value={d.slug} disabled={overBudget}>
+                          {d.name} ({cost} DP){d.isFactionPack ? ' (Faction Pack)' : ''}{overBudget ? ' — over budget' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <span
+                    title={applicableBattleSize ? `Detachment point budget for ${applicableBattleSize.name} (${applicableBattleSize.pointsLimit} pts)` : 'Detachment point budget'}
+                    style={{ fontSize: '0.85rem', fontWeight: 700, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', color: usedDetachmentPoints > detachmentPointsLimit ? 'var(--accent-red)' : 'var(--accent-teal)' }}
+                  >
+                    {usedDetachmentPoints} / {detachmentPointsLimit} DP
+                  </span>
+                </div>
+                {selectedDetachments.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {selectedDetachments.map(d => (
+                      <span
+                        key={d.slug}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--bg-tertiary)', border: '1px solid var(--glass-border)', borderRadius: '6px', padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                      >
+                        {d.name} <span style={{ color: 'var(--text-muted)' }}>({d.detachmentPointsCost || 0} DP)</span>
+                        <button
+                          onClick={() => handleRemoveDetachment(d.slug)}
+                          aria-label={`Remove ${d.name}`}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--accent-red)', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '1rem' }}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Points gauge & Limits */}
@@ -1361,7 +1442,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   </h2>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10pt', fontWeight: 600 }}>
                     <span>FACTION: {factionData.factionName.toUpperCase()}</span>
-                    <span>DETACHMENT: {selectedDetachmentSlug ? (factionData.detachments.find(d => d.slug === selectedDetachmentSlug)?.name || '').toUpperCase() : 'NONE'}</span>
+                    <span>DETACHMENTS: {selectedDetachments.length > 0 ? selectedDetachments.map(d => d.name).join(' + ').toUpperCase() : 'NONE'}</span>
                     <span>TOTAL: {totalPoints} / {pointLimit} PTS</span>
                   </div>
                 </div>
@@ -1656,9 +1737,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     // Available size options
     const costOptions = getDatasheetCosts(matchedCatalog?.appDatasheet);
 
-    // Detachment enhancements list
-    const matchedDetachment = factionData.detachments.find(d => d.slug === selectedDetachmentSlug);
-    const enhancementOptions = matchedDetachment?.enhancements || [];
+    // Enhancements are offered from every selected detachment (grouped when several)
 
     // Leader attach targets (units in roster that are not characters and are compatible)
     const validBodyguards = roster.filter(b => !b.isCharacter);
@@ -1759,8 +1838,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 </select>
               </div>
 
-              {/* 3. Enhancements selection (Characters only, requires detachment) */}
-              {selectedDetachmentSlug ? (
+              {/* 3. Enhancements selection (Characters only, requires at least one detachment) */}
+              {selectedDetachments.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                   <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Detachment Enhancement</span>
                   <select
@@ -1777,11 +1856,23 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                     }}
                   >
                     <option value="none">-- Select Enhancement --</option>
-                    {enhancementOptions.map(e => (
-                      <option key={e.name} value={e.name}>
-                        {e.name} (+{e.pointsCost} pts)
-                      </option>
-                    ))}
+                    {selectedDetachments.length === 1 ? (
+                      selectedDetachments[0].enhancements.map(e => (
+                        <option key={e.name} value={e.name}>
+                          {e.name} (+{e.pointsCost} pts)
+                        </option>
+                      ))
+                    ) : (
+                      selectedDetachments.map(d => (
+                        <optgroup key={d.slug} label={d.name}>
+                          {d.enhancements.map(e => (
+                            <option key={e.name} value={e.name}>
+                              {e.name} (+{e.pointsCost} pts)
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))
+                    )}
                   </select>
                 </div>
               ) : (

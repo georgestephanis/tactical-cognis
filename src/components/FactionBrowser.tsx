@@ -462,7 +462,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                           fontSize: '0.85rem',
                           fontWeight: 600
                         }}>
-                          Cost: {det.detachmentPointsCost} pts
+                          Cost: {det.detachmentPointsCost} DP
                         </span>
                       )}
                       {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
