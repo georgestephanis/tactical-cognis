@@ -209,6 +209,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                       <div className="datasheet-stat-cell"><span className="datasheet-stat-lbl">M</span><span className="datasheet-stat-val">{model.stats.M}</span></div>
                       <div className="datasheet-stat-cell"><span className="datasheet-stat-lbl">T</span><span className="datasheet-stat-val">{model.stats.T}</span></div>
                       <div className="datasheet-stat-cell"><span className="datasheet-stat-lbl">Sv</span><span className="datasheet-stat-val">{model.stats.Sv}</span></div>
+                      {model.stats.Inv && <div className="datasheet-stat-cell"><span className="datasheet-stat-lbl">Inv</span><span className="datasheet-stat-val" style={{ color: 'var(--accent-teal)' }}>{model.stats.Inv}+</span></div>}
                       <div className="datasheet-stat-cell"><span className="datasheet-stat-lbl">W</span><span className="datasheet-stat-val" style={{ color: 'var(--accent-red)' }}>{model.stats.W}</span></div>
                       <div className="datasheet-stat-cell"><span className="datasheet-stat-lbl">Ld</span><span className="datasheet-stat-val">{model.stats.Ld}</span></div>
                       <div className="datasheet-stat-cell"><span className="datasheet-stat-lbl">OC</span><span className="datasheet-stat-val" style={{ color: 'var(--accent-gold)' }}>{model.stats.OC}</span></div>
@@ -412,6 +413,12 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                             <span className="stat-pill-label">Sv</span>
                             <span className="stat-pill-val">{model.stats.Sv}</span>
                           </div>
+                          {model.stats.Inv && (
+                            <div className="stat-pill">
+                              <span className="stat-pill-label">Inv</span>
+                              <span className="stat-pill-val" style={{ color: 'var(--accent-teal)' }}>{model.stats.Inv}+</span>
+                            </div>
+                          )}
                           <div className="stat-pill">
                             <span className="stat-pill-label">W</span>
                             <span className="stat-pill-val" style={{ color: 'var(--accent-red)' }}>{model.stats.W}</span>

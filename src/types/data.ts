@@ -7,6 +7,7 @@ export interface Statline {
   W: string;
   Ld: string;
   OC: string;
+  Inv?: string | null; // Invulnerable save, e.g. "4+" (rendered as 4++); null if none
 }
 
 export interface WeaponProfile {

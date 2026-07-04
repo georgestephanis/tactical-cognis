@@ -246,6 +246,29 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     ORDER BY m.displayOrder
   `);
 
+  // 2b. Fetch invulnerable saves. Rows are keyed on datasheetId with an optional
+  // miniatureId; a miniature-specific row wins over the datasheet-wide fallback.
+  const invulnSaves = await query(`
+    SELECT datasheetId, miniatureId, save, meleeSave, rangedSave
+    FROM invulnerable_save
+    WHERE datasheetId IN (${dsIds})
+  `);
+  // ponytail: split melee/ranged invulns collapse to one value; ~1 datasheet uses the split.
+  const invForMini = (datasheetId: unknown, miniatureId: unknown): string | null => {
+    const rows = invulnSaves.filter(r => r.datasheetId === datasheetId);
+    const row = rows.find(r => r.miniatureId === miniatureId) || rows.find(r => r.miniatureId == null);
+    const val = row && (row.save ?? row.meleeSave ?? row.rangedSave);
+    return val ? String(val) : null;
+  };
+
+  // 2c. Fetch damaged-bracket profiles for vehicles/monsters.
+  const damageRows = await query(`
+    SELECT datasheetId, name, damagedAt, rules
+    FROM datasheet_damage
+    WHERE datasheetId IN (${dsIds})
+    ORDER BY displayOrder
+  `);
+
   // 3. Fetch all keywords for these miniatures
   const miniKeywords = await query(`
     SELECT mk.miniatureId, k.name
@@ -387,7 +410,7 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
       id: m.id,
       name: m.name,
       statlineHidden: !!m.statlineHidden,
-      stats: { M: m.M, T: m.T, Sv: m.Sv, W: m.W, Ld: m.Ld, OC: m.OC },
+      stats: { M: m.M, T: m.T, Sv: m.Sv, W: m.W, Ld: m.Ld, OC: m.OC, Inv: invForMini(m.datasheetId, m.id) },
       keywords: kws,
       weapons: miniWeaponsMap.get(String(m.id)) || [],
     });
@@ -453,7 +476,9 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     pointsSteps: datasheetPointsSteps
       .filter(dps => dps.datasheetId === ds.id)
       .map(dps => ({ stepAt: dps.stepAt, stepPoints: dps.stepPoints })),
-    damageProfiles: [],
+    damageProfiles: damageRows
+      .filter(dr => dr.datasheetId === ds.id)
+      .map(dr => ({ name: String(dr.name), damagedAt: dr.damagedAt != null ? String(dr.damagedAt) : null, rules: String(dr.rules ?? '') })),
     leads: bodyguardMap.get(String(ds.id)) || [],
   }));
 };

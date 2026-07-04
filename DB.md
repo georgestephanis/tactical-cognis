@@ -166,10 +166,12 @@ Meta-factions (umbrella keywords that span several sub-faction keywords) are exp
 in code via `META_FACTION_MAP` in `db.ts`, then widened by following datasheets that
 carry both a parent and child faction keyword.
 
-Notably **unused so far**: `datasheet_damage` (damaged-vehicle brackets),
-`invulnerable_save`, `loadout_choice*` (swap options), `wargear_limit*`, the missions
-family (other than `battle_size`), `allied_faction*`, and `faq`. All candidates for
-future features.
+Notably **unused so far**: `loadout_choice*` (swap options), `wargear_limit*`, the
+missions family (other than `battle_size`), `allied_faction*`, and `faq`. All
+candidates for future features — see [`TODO.md`](./TODO.md) for the integration
+assessment of each. (`invulnerable_save` and `datasheet_damage` are now queried in
+`getUnitsByFaction` — invuln folds into each model's statline, damaged brackets into
+`Datasheet.damageProfiles`.)
 
 ## Useful query shapes
 
