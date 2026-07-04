@@ -32,7 +32,7 @@ There is no wired-up test command. `src/utils/mathhammer.test.ts` exports `runMa
 ## Architecture
 
 - `src/App.tsx` — top-level router. No react-router; view state is synced to `?view=&faction=&unit=` query params by hand via `history.pushState`/`popstate`.
-- `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers.
+- `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers. The database schema is documented in `DB.md` (structure only — never add actual row contents to that file).
 - `src/utils/dataMapper.ts` — maps raw DB rows into the `MergedUnit`/`MergedFaction` shapes the UI consumes.
 - `src/utils/mathhammer.ts` — pure combat-math engine (hit/wound/save/damage expectation, devastating wounds, FNP, AP reduction, etc.), no DB or React dependency.
 - `src/components/` — one component per view (`Dashboard`, `FactionBrowser`, `UnitDetails`, `ArmyBuilder`, `DeepAnalysis`) plus `DatabaseUploadView` for the no-DB fallback.

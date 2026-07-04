@@ -15,7 +15,7 @@ npm run dev        # http://localhost:5174
 
 ## Getting a database
 
-The app reads a `40k.sqlite` file with the companion-app schema (`datasheet`, `miniature`, `wargear_item`, etc.). You have three options:
+The app reads a `40k.sqlite` file with the companion-app schema (`datasheet`, `miniature`, `wargear_item`, etc. — see [DB.md](./DB.md) for the full schema reference). You have three options:
 
 1. **Auto-find (Mac)** — `npm run db:find` scans `~/Library/Containers` for the companion app's sandboxed database and copies it to `public/40k.sqlite`.
 2. **Manual extraction** — see [manual-db-sqlite.md](./manual-db-sqlite.md) for pulling `db.sqlite` straight out of the official WH40k companion app by hand.

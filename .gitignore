@@ -20,7 +20,7 @@ logs
 # Extracted game database and sql.js WASM runtime — never commit game data.
 # Drop your own public/40k.sqlite here for local dev (see manual-db-sqlite.md),
 # or use the in-app upload prompt at runtime.
-public/40k.sqlite
+public/40k.sqlite*
 public/sql-wasm.wasm
 public/sql-wasm-debug.wasm
 public/sql-wasm-debug.js
