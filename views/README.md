@@ -61,3 +61,11 @@ Click on any view below to read its technical design, style sheets, rendering me
 
 - **State synchronization:** The top-level state is owned by [App.tsx](file:///Users/georgestephanis/code/tactical-cognis/src/App.tsx). Sub-views invoke callbacks such as `onSelectFaction` or `onSelectUnit` to adjust this state.
 - **Deep Linking:** The URL query parameters `?view=`, `?faction=`, and `?unit=` are parsed dynamically to route the user directly to Factions, specific Units, or analytical workspaces upon page load.
+
+---
+
+## 🛠️ Technical Core Documentation
+
+For deeper details on the core analytical utilities and database connectors:
+- **[Mathhammer Simulation Engine](../docs/mathhammer_engine.md):** Detailed formulas, variables parsing, and rule combinations.
+- **[Data & Mapping Architecture](../docs/data_architecture.md):** Information on data loading, caching maps, and schema relational rows mapping.

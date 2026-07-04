@@ -38,3 +38,14 @@ You cannot open `index.html` via `file://` — the app fetches WASM and the DB o
 npx serve dist-distributable
 # or: python3 -m http.server --directory dist-distributable 8080
 ```
+
+---
+
+## 📖 Documentation Index
+
+For details on the project structure, views, and core engines, see:
+- **[UI Storyboard Registry](./views/README.md):** An interactive view map describing each main page layout, CSS selectors, and sub-routing parameters.
+- **[Mathhammer Simulation Engine](./docs/mathhammer_engine.md):** The math formulas, special rule combinations, and dice parsing logic.
+- **[Data & Mapping Architecture](./docs/data_architecture.md):** Relational queries, caching layers, and TypeScript structures.
+- **[Database Schema Reference](./DB.md):** Comprehensive schema map of the Warhammer companion app SQLite db.
+- **[Manual SQLite Setup](./manual-db-sqlite.md):** Detailed guide to extracting the database from your device.
