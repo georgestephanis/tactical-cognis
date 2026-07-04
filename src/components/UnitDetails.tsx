@@ -49,11 +49,25 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
   // Get baseline points cost for point-yield calculation
   const unitPoints = unit.pointsRange.min || 0;
 
-  // Gather all unique weapons from all models in the datasheet
+  // Gather all unique weapons from all models in the datasheet (including wargear choices)
   const allWeaponsMap = new Map<string, Weapon>();
   datasheet.models.forEach(model => {
     model.weapons?.forEach(wp => {
       allWeaponsMap.set(wp.name, wp);
+    });
+    model.wargearChoiceSets?.forEach(set => {
+      set.choices.forEach(choice => {
+        choice.items.forEach(item => {
+          if (item.wargearType === 'weapon') {
+            allWeaponsMap.set(item.name, {
+              name: item.name,
+              wargearType: item.wargearType,
+              count: item.count,
+              profiles: item.profiles
+            });
+          }
+        });
+      });
     });
   });
   const allWeapons = Array.from(allWeaponsMap.values());
@@ -371,6 +385,45 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                     )}
                   </div>
                 </div>
+
+                {/* Wargear Options Section */}
+                {datasheet.models.some(m => m.wargearChoiceSets && m.wargearChoiceSets.length > 0) && (
+                  <div>
+                    <div className="datasheet-section-title">Wargear Options</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: 'rgba(0,0,0,0.15)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)', textAlign: 'left' }}>
+                      {datasheet.models.map(model => {
+                        const modelSets = model.wargearChoiceSets?.filter(s => s.choices.length > 1) || [];
+                        if (modelSets.length === 0) return null;
+                        return (
+                          <div key={model.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {datasheet.models.length > 1 && (
+                              <h4 style={{ fontSize: '0.9rem', color: 'var(--accent-teal)', textTransform: 'uppercase', fontFamily: 'var(--font-mono)', margin: 0 }}>
+                                {model.name} Options
+                              </h4>
+                            )}
+                            {modelSets.map((set, idx) => {
+                              return (
+                                <div key={set.id || idx} style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+                                    Choose up to {set.limit} of the following:
+                                  </div>
+                                  <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                    {set.choices.map((choice, cidx) => {
+                                      const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                                      return (
+                                        <li key={choice.id || cidx}>{label}</li>
+                                      );
+                                    })}
+                                  </ul>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Keywords */}

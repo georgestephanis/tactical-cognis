@@ -30,6 +30,46 @@ export interface Weapon {
   profiles: WeaponProfile[];
 }
 
+export interface WargearChoiceItem {
+  wargearItemId: string;
+  name: string;
+  wargearType: string; // 'weapon' | 'wargear'
+  count: number;
+  profiles: WeaponProfile[];
+}
+
+export interface WargearChoice {
+  id: string;
+  items: WargearChoiceItem[];
+}
+
+export interface WargearChoiceSet {
+  id: string;
+  limit: number;
+  allowDuplicates: boolean;
+  alternate: boolean;
+  choices: WargearChoice[];
+}
+
+export interface WargearLimit {
+  modelCount: number;
+  choiceLimit: number;
+  duplicateLimit: number | null;
+}
+
+export interface LimitedWargearChoice {
+  id: string;
+  wargearItemIds: string[];
+}
+
+export interface LimitedWargearChoiceSet {
+  id: string;
+  miniatureId: string | null;
+  mandatory: boolean;
+  limits: WargearLimit[];
+  choices: LimitedWargearChoice[];
+}
+
 export interface Model {
   id: string;
   name: string;
@@ -37,6 +77,7 @@ export interface Model {
   stats: Statline;
   keywords: string[];
   weapons: Weapon[];
+  wargearChoiceSets?: WargearChoiceSet[];
 }
 
 export interface CompositionModel {
@@ -87,6 +128,7 @@ export interface Datasheet {
   abilities: Ability[];
   damageProfiles: DamageProfile[];
   leads?: string[];
+  limitedWargearChoiceSets?: LimitedWargearChoiceSet[];
 }
 
 export interface AppDetachmentRule {
@@ -179,6 +221,8 @@ export interface RosterUnit {
   enhancementName?: string;
   enhancementPoints?: number;
   isWarlord?: boolean;
+  selectedWargearChoices?: Record<string, string[]>; // choiceSetId -> choiceId[]
+  wargearCounts?: Record<string, number>; // choiceId -> count selected
 }
 
 export interface ArmyList {
