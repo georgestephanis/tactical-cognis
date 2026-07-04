@@ -24,3 +24,4 @@ public/40k.sqlite*
 public/sql-wasm.wasm
 public/sql-wasm-debug.wasm
 public/sql-wasm-debug.js
+/.antigravitycli
