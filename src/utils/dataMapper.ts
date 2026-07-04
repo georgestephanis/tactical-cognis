@@ -66,22 +66,6 @@ export function getDatasheetCosts(ds: Datasheet | null | undefined): DerivedCost
 }
 
 /**
- * Maps common meta-faction slugs to their constituent faction keywords.
- * (Sync'd with META_FACTION_MAP in db.ts)
- */
-export const FACTION_SLUG_MAP: Record<string, string[]> = {
-  'aeldari': ['asuryani', 'harlequins', 'ynnari'],
-  'chaos-daemons': ['legiones-daemonica', 'blood-legions', 'plague-legions', 'scintillating-legions', 'legions-of-excess'],
-  'space-marines': ['adeptus-astartes', 'black-templars', 'blood-angels', 'dark-angels', 'space-wolves'],
-  'black-templars': ['black-templars'],
-  'blood-angels': ['blood-angels'],
-  'dark-angels': ['dark-angels'],
-  'space-wolves': ['space-wolves'],
-  'chaos-space-marines': ['heretic-astartes'],
-  'chaos-titan-legions': ['titanicus-traitoris'],
-};
-
-/**
  * In-memory cache of merged factions, keyed by slug. The SQLite queries behind
  * a faction merge are expensive and the underlying DB is immutable per session,
  * so we only ever build each faction once.

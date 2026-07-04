@@ -142,9 +142,9 @@ export function DatabaseUploadView({ onDbLoaded }: DatabaseUploadViewProps) {
             <li>
               Make a safe copy (don't just drag the raw file — it may be split across WAL journal
               files):{' '}
-              <code>sqlite3 "file:&lt;path-from-above&gt;?mode=ro" ".backup '~/Desktop/db.sqlite'"</code>
+              <code>sqlite3 "file:&lt;path-from-above&gt;?mode=ro" ".backup '$HOME/Desktop/db.sqlite'"</code>
             </li>
-            <li>Drop the resulting <code>~/Desktop/db.sqlite</code> file above to initialize faction datasheets and stats in-memory, securely, on your device.</li>
+            <li>Drop the resulting <code>db.sqlite</code> file from your Desktop above to initialize faction datasheets and stats in-memory, securely, on your device.</li>
           </ol>
         </div>
       </div>

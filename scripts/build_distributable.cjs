@@ -33,12 +33,14 @@ try {
   console.log("Creating dedicated distributable build folder...");
   fs.renameSync(distPath, distDistPath);
 
-  // 4. Verify no database/backup/override files are present in distribution
-  const distFiles = fs.readdirSync(distDistPath);
+  // 4. Verify no database/backup/override files are present in distribution (recursive)
+  const distFiles = fs.readdirSync(distDistPath, { recursive: true });
   distFiles.forEach(f => {
-    if (f.endsWith('.sqlite') || f.endsWith('.bak') || f === 'mfm-overrides.json') {
-      console.log(`Removing compiled data file to prevent IP leakage: ${f}`);
-      fs.unlinkSync(path.join(distDistPath, f));
+    const rel = String(f);
+    const base = path.basename(rel);
+    if (base.endsWith('.sqlite') || base.endsWith('.bak') || base === 'mfm-overrides.json') {
+      console.log(`Removing compiled data file to prevent IP leakage: ${rel}`);
+      fs.unlinkSync(path.join(distDistPath, rel));
     }
   });
 
@@ -48,6 +50,7 @@ try {
 
 } catch (err) {
   console.error("Compilation failed:", err);
+  process.exitCode = 1;
 } finally {
   // 5. Restore original database for local development
   if (dbWasHidden && fs.existsSync(backupDbPath)) {

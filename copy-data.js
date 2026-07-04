@@ -7,7 +7,8 @@ const __dirname = path.dirname(__filename);
 
 function copyWasm() {
   const dist = path.join(__dirname, "node_modules", "sql.js", "dist");
-  const files = ["sql-wasm.wasm", "sql-wasm-debug.wasm", "sql-wasm-debug.js"];
+  // ponytail: only the release wasm — db.ts fetches /sql-wasm.wasm and nothing else
+  const files = ["sql-wasm.wasm"];
 
   files.forEach((file) => {
     const src = path.join(dist, file);

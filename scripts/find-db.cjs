@@ -37,7 +37,7 @@ fs.mkdirSync(path.dirname(destPath), { recursive: true });
 
 try {
   // Use sqlite3's .backup (not a raw file copy) since the live db is often split across WAL journal files.
-  execFileSync('sqlite3', [`file:${dbPath}?mode=ro`, `.backup ${destPath}`]);
+  execFileSync('sqlite3', [`file:${dbPath}?mode=ro`, `.backup '${destPath}'`]);
   console.log(`Copied to ${destPath}`);
 } catch (err) {
   console.error('Failed to back up the database with sqlite3:', err.message);
