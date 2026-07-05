@@ -4,9 +4,18 @@ import type {
   MergedDetachment,
   AppDetachmentRule,
   AppEnhancement,
-  AppStratagem
+  AppStratagem,
+  AlliedLimit
 } from '../types/data';
-import { initDatabase, getUnitsByFaction, getDetachmentsByFaction, normalizeName } from './db';
+import {
+  initDatabase,
+  getUnitsByFaction,
+  getDetachmentsByFaction,
+  normalizeName,
+  getAlliedUnitsForFaction,
+  getAlliedLimitsForFaction,
+  getFactionKeywordIds
+} from './db';
 
 export { normalizeName };
 
@@ -16,6 +25,9 @@ export interface MergedFaction {
   appRawList: Datasheet[];
   units: MergedUnit[];
   detachments: MergedDetachment[];
+  alliedUnits?: MergedUnit[];
+  alliedLimits?: AlliedLimit[];
+  factionKeywordIds?: string[];
 }
 
 /**
@@ -29,13 +41,68 @@ export interface DerivedCost {
 }
 
 /**
- * Derive per-tier pricing and model counts from a datasheet's compositions.
- * Each composition is one price tier; its model count is the sum of the max
- * size of each miniature group (matching the full squad size the points buy).
+ * Derive per-tier pricing and model counts from a datasheet's compositions,
+ * filtered by the current army's active keywords, detachment, and faction slug context.
  */
-export function getDatasheetCosts(ds: Datasheet | null | undefined): DerivedCost[] {
+export function getDatasheetCosts(
+  ds: Datasheet | null | undefined,
+  activeFactionKeywordIds: string[] = [],
+  activeDetachmentId?: string | null,
+  factionSlug?: string | null
+): DerivedCost[] {
   if (!ds?.compositions) return [];
-  return ds.compositions
+
+  // Resolve meta group keywords (Imperium / Chaos / Aeldari) based on slug
+  const imperiumSlugs = [
+    'space-marines',
+    'astra-militarum',
+    'adepta-sororitas',
+    'adeptus-mechanicus',
+    'adeptus-custodes',
+    'grey-knights',
+    'imperial-knights',
+    'agents-of-the-imperium'
+  ];
+  const chaosSlugs = [
+    'chaos-space-marines',
+    'death-guard',
+    'thousand-sons',
+    'world-eaters',
+    'chaos-daemons',
+    'chaos-knights'
+  ];
+  const aeldariSlugs = ['aeldari', 'drukhari'];
+
+  const matchesGroup = (groupName: string | null | undefined): boolean => {
+    if (!groupName || !factionSlug) return false;
+    const normGroup = groupName.toLowerCase();
+    if (normGroup === 'imperium') return imperiumSlugs.includes(factionSlug);
+    if (normGroup === 'chaos') return chaosSlugs.includes(factionSlug);
+    if (normGroup === 'aeldari' || normGroup === 'aeldari / drukhari') return aeldariSlugs.includes(factionSlug);
+    return false;
+  };
+
+  // Find eligible compositions based on active filters
+  const eligible = ds.compositions.filter(c => {
+    // 1. Detachment limit check
+    if (c.requiredDetachmentIds && c.requiredDetachmentIds.length > 0) {
+      if (!activeDetachmentId || !c.requiredDetachmentIds.includes(activeDetachmentId)) return false;
+    }
+    // 2. Faction limit check
+    if (c.requiredFactionKeywordIds && c.requiredFactionKeywordIds.length > 0) {
+      if (!activeFactionKeywordIds.some(id => c.requiredFactionKeywordIds!.includes(id))) return false;
+    }
+    // 3. Group limit check
+    if (c.referenceGroupingKeywordName) {
+      if (!matchesGroup(c.referenceGroupingKeywordName)) return false;
+    }
+    return true;
+  });
+
+  // Fallback to default compositions if filters yielded nothing
+  const targetCompositions = eligible.length > 0 ? eligible : ds.compositions;
+
+  return targetCompositions
     .filter(c => c.points != null && Number(c.points) > 0)
     .map(c => {
       const models = (c.models || []).reduce((sum, m) => sum + (m.max ?? m.min ?? 0), 0);
@@ -66,6 +133,9 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
   // Fetch results from SQLite
   const dbUnits = await getUnitsByFaction(factionSlug);
   const dbDetachments = await getDetachmentsByFaction(factionSlug);
+  const dbAlliedUnits = await getAlliedUnitsForFaction(factionSlug);
+  const dbAlliedLimits = await getAlliedLimitsForFaction(factionSlug);
+  const factionKeywordIds = await getFactionKeywordIds(factionSlug);
 
   const mergedUnits: MergedUnit[] = [];
 
@@ -93,6 +163,38 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
   });
 
   mergedUnits.sort((a, b) => a.name.localeCompare(b.name));
+
+  const alliedUnits: MergedUnit[] = [];
+  dbAlliedUnits.forEach(u => {
+    const ds = u as unknown as Datasheet;
+
+    let minPts = 0;
+    let maxPts = 0;
+    if (ds.compositions && ds.compositions.length > 0) {
+      const points = ds.compositions.map(c => Number(c.points));
+      minPts = Math.min(...points);
+      maxPts = Math.max(...points);
+    }
+
+    alliedUnits.push({
+      name: String(ds.name),
+      slug: String(ds.slug),
+      appDatasheet: ds,
+      pointsRange: { min: minPts, max: maxPts },
+      isCombatPatrol: false,
+      isFactionPack: false,
+      isAllied: true,
+      requiredDetachmentIds: (u as { requiredDetachmentIds?: string[] }).requiredDetachmentIds || [],
+    });
+  });
+
+  alliedUnits.sort((a, b) => a.name.localeCompare(b.name));
+
+  const alliedLimits: AlliedLimit[] = dbAlliedLimits.map((l: Record<string, unknown>) => ({
+    keyword: String(l.keyword),
+    limitCount: Number(l.limitCount),
+    battleSize: l.battleSize ? String(l.battleSize) : null,
+  }));
 
   const mergedDetachments: MergedDetachment[] = [];
   const seenDetachmentIds = new Set<string>();
@@ -142,9 +244,11 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
     appRawList: dbUnits as unknown as Datasheet[],
     units: mergedUnits,
     detachments: mergedDetachments,
+    alliedUnits,
+    alliedLimits,
+    factionKeywordIds,
   };
 
   factionCache.set(factionSlug, merged);
   return merged;
 }
-

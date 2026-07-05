@@ -1,6 +1,6 @@
 import initSqlJs from 'sql.js';
 import type * as SQL from 'sql.js';
-import type { WargearChoiceSet, WargearChoiceItem, WeaponProfile, LimitedWargearChoiceSet, LimitedWargearChoice, WargearLimit } from '../types/data';
+
 
 // Handle cases where initSqlJs might be nested in a 'default' property due to Vite/ESM mismatch
 const getInitSqlJs = () => {
@@ -179,7 +179,7 @@ const META_FACTION_MAP: Record<string, string[]> = {
  * Finding the faction keyword ID from a slug.
  * Also returns "child" faction IDs if the target is a known parent (e.g., Adeptus Astartes).
  */
-async function getFactionKeywordIds(slug: string): Promise<string[]> {
+export async function getFactionKeywordIds(slug: string): Promise<string[]> {
   const allFactions = await query("SELECT id, name FROM faction_keyword");
 
   // Expand meta-factions (like aeldari -> asuryani, harlequins)
@@ -227,6 +227,14 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
   `);
 
   if (datasheets.length === 0) return [];
+  return assembleDatasheets(datasheets);
+};
+
+/**
+ * Assembles all related datasheet information (miniatures, saves, keywords, compositions,
+ * weapons, abilities, bodyguard info, and limits) for a given array of datasheets.
+ */
+async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
   const dsIds = datasheets.map(d => `'${d.id}'`).join(',');
 
   // 1b. Get ALL faction keywords for these datasheets (to show sub-faction tags)
@@ -247,14 +255,12 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     ORDER BY m.displayOrder
   `);
 
-  // 2b. Fetch invulnerable saves. Rows are keyed on datasheetId with an optional
-  // miniatureId; a miniature-specific row wins over the datasheet-wide fallback.
+  // 2b. Fetch invulnerable saves.
   const invulnSaves = await query(`
     SELECT datasheetId, miniatureId, save, meleeSave, rangedSave
     FROM invulnerable_save
     WHERE datasheetId IN (${dsIds})
   `);
-  // ponytail: split melee/ranged invulns collapse to one value; ~1 datasheet uses the split.
   const invForMini = (datasheetId: unknown, miniatureId: unknown): string | null => {
     const rows = invulnSaves.filter(r => r.datasheetId === datasheetId);
     const row = rows.find(r => r.miniatureId === miniatureId) || rows.find(r => r.miniatureId == null);
@@ -278,12 +284,26 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     WHERE mk.miniatureId IN (SELECT id FROM miniature WHERE datasheetId IN (${dsIds}))
   `);
 
-  // 4. Fetch all compositions
+  // 4. Fetch all compositions, including the grouping keyword name if set
   const compositions = await query(`
-    SELECT id, datasheetId, points, isDefault
-    FROM unit_composition
-    WHERE datasheetId IN (${dsIds})
-    ORDER BY displayOrder
+    SELECT uc.id, uc.datasheetId, uc.points, uc.isDefault, uc.referenceGroupingKeywordId, k.name AS referenceGroupingKeywordName
+    FROM unit_composition uc
+    LEFT JOIN keyword k ON uc.referenceGroupingKeywordId = k.id
+    WHERE uc.datasheetId IN (${dsIds})
+    ORDER BY uc.displayOrder
+  `);
+
+  // 4b. Fetch required faction keywords and required detachments for compositions
+  const compRequiredFactions = await query(`
+    SELECT unitCompositionId, factionKeywordId
+    FROM unit_composition_required_faction_keyword
+    WHERE unitCompositionId IN (SELECT id FROM unit_composition WHERE datasheetId IN (${dsIds}))
+  `);
+
+  const compRequiredDetachments = await query(`
+    SELECT unitCompositionId, detachmentId
+    FROM unit_composition_required_detachment
+    WHERE unitCompositionId IN (SELECT id FROM unit_composition WHERE datasheetId IN (${dsIds}))
   `);
 
   // 5. Fetch composition models
@@ -303,7 +323,7 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     ORDER BY dda.displayOrder
   `);
 
-  // 6b. Fetch datasheet rules (like Patrol Squad)
+  // 6b. Fetch datasheet rules
   const datasheetRules = await query(`
     SELECT datasheetId, name, rules
     FROM datasheet_rule
@@ -333,10 +353,8 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     WHERE dbgk.datasheetBodyguardGroupId IN (${bgIds})
   `) : [];
 
-  // 8. Fetch wargear and weapons
-  const wargearItems = await query(`
-    SELECT id, name, wargearType FROM wargear_item
-  `);
+  // 8. Fetch wargear items and profiles
+  const wargearItems = await query(`SELECT id, name, wargearType FROM wargear_item`);
   const wargearItemMap = new Map<string, Record<string, unknown>>();
   wargearItems.forEach(item => wargearItemMap.set(String(item.id), item));
 
@@ -351,9 +369,7 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     JOIN wargear_ability wa ON wipwa.wargearAbilityId = wa.id
   `);
 
-  const allLoadouts = await query(`
-    SELECT id, datasheetId, miniatureId FROM base_miniature_loadout WHERE datasheetId IN (${dsIds})
-  `);
+  const allLoadouts = await query(`SELECT id, datasheetId, miniatureId FROM base_miniature_loadout WHERE datasheetId IN (${dsIds})`);
   const loadoutOptions = await query(`
     SELECT bmlwo.baseMiniatureLoadoutId, bmlwo.count, wo.wargearItemId
     FROM base_miniature_loadout_wargear_option bmlwo
@@ -361,45 +377,22 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     WHERE bmlwo.baseMiniatureLoadoutId IN (SELECT id FROM base_miniature_loadout WHERE datasheetId IN (${dsIds}))
   `);
 
-  // Assemble wargear/weapons for each model
   const miniWeaponsMap = new Map<string, unknown[]>();
   allLoadouts.forEach(loadout => {
     const options = loadoutOptions.filter(opt => opt.baseMiniatureLoadoutId === loadout.id);
     const weapons: unknown[] = [];
     const seenItems = new Set();
-
     options.forEach(opt => {
       if (seenItems.has(opt.wargearItemId)) return;
       seenItems.add(opt.wargearItemId);
-
       const item = wargearItemMap.get(String(opt.wargearItemId));
       if (!item) return;
-
       const profiles = allProfiles.filter(p => p.wargearItemId === opt.wargearItemId).map(p => {
         const rules = profileAbilities.filter(pa => pa.wargearItemProfileId === p.id).map(pa => String(pa.name));
-        return {
-          name: p.name || item.name,
-          type: p.type,
-          range: p.range,
-          attacks: p.attacks,
-          ballisticSkill: p.ballisticSkill,
-          weaponSkill: p.weaponSkill,
-          strength: p.strength,
-          armourPenetration: p.armourPenetration,
-          damage: p.damage,
-          rules: rules,
-        };
+        return { name: p.name || item.name, type: p.type, range: p.range, attacks: p.attacks, ballisticSkill: p.ballisticSkill, weaponSkill: p.weaponSkill, strength: p.strength, armourPenetration: p.armourPenetration, damage: p.damage, rules: rules };
       });
-
-      weapons.push({
-        name: item.name,
-        wargearType: item.wargearType,
-        count: Number(opt.count),
-        profiles: profiles,
-      });
+      weapons.push({ name: item.name, wargearType: item.wargearType, count: Number(opt.count), profiles: profiles });
     });
-
-    weapons.sort((a, b) => String((a as { name: string }).name).localeCompare(String((b as { name: string }).name)));
     miniWeaponsMap.set(String(loadout.miniatureId), weapons);
   });
 
@@ -410,213 +403,116 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     WHERE datasheetId IN (${dsIds})
   `);
   const choiceSetIds = choiceSets.map(cs => `'${cs.id}'`).join(',');
-
-  const choices = choiceSetIds ? await query(`
-    SELECT id, loadoutChoiceSetId
-    FROM loadout_choice
-    WHERE loadoutChoiceSetId IN (${choiceSetIds})
-  `) : [];
+  const choices = choiceSetIds ? await query(`SELECT id, loadoutChoiceSetId FROM loadout_choice WHERE loadoutChoiceSetId IN (${choiceSetIds})`) : [];
   const choiceIds = choices.map(c => `'${c.id}'`).join(',');
-
-  const choiceItems = choiceIds ? await query(`
-    SELECT lcwi.loadoutChoiceId, lcwi.wargearItemId, lcwi.count
+  const choiceWargearItems = choiceIds ? await query(`
+    SELECT lcwi.loadoutChoiceId, lcwi.count, lcwi.wargearItemId
     FROM loadout_choice_wargear_item lcwi
     WHERE lcwi.loadoutChoiceId IN (${choiceIds})
   `) : [];
 
-  // Map choice sets by miniatureId or datasheetId
-  const choiceSetMap = new Map<string, WargearChoiceSet[]>();
-  choiceSets.forEach(cs => {
-    const csChoices = choices.filter(c => c.loadoutChoiceSetId === cs.id).map(c => {
-      const items = choiceItems.filter(ci => ci.loadoutChoiceId === c.id).map(ci => {
-        const item = wargearItemMap.get(String(ci.wargearItemId));
-        if (!item) return null;
-
-        const profiles: WeaponProfile[] = allProfiles.filter(p => p.wargearItemId === ci.wargearItemId).map(p => {
-          const rules = profileAbilities.filter(pa => pa.wargearItemProfileId === p.id).map(pa => String(pa.name));
-          return {
-            name: p.name ? String(p.name) : String(item.name),
-            type: String(p.type),
-            range: String(p.range),
-            attacks: String(p.attacks),
-            ballisticSkill: p.ballisticSkill ? String(p.ballisticSkill) : null,
-            weaponSkill: p.weaponSkill ? String(p.weaponSkill) : null,
-            strength: String(p.strength),
-            armourPenetration: String(p.armourPenetration),
-            damage: String(p.damage),
-            rules: rules,
-          };
-        });
-
-        return {
-          wargearItemId: String(ci.wargearItemId),
-          name: String(item.name),
-          wargearType: String(item.wargearType),
-          count: Number(ci.count),
-          profiles: profiles,
-        } as WargearChoiceItem;
-      }).filter((item): item is WargearChoiceItem => item !== null);
-
-      return {
-        id: String(c.id),
-        items: items,
-      };
-    }).filter(choice => choice.items.length > 0); // Only keep choices that resolved successfully
-
-    const key = String(cs.miniatureId || cs.datasheetId);
-    if (!choiceSetMap.has(key)) {
-      choiceSetMap.set(key, []);
-    }
-    choiceSetMap.get(key)!.push({
-      id: String(cs.id),
-      limit: Number(cs.limit),
-      allowDuplicates: !!cs.allowDuplicates,
-      alternate: !!cs.alternate,
-      choices: csChoices,
-      miniatureId: cs.miniatureId ? String(cs.miniatureId) : null,
+  const choiceMap = new Map<string, unknown[]>();
+  choices.forEach(c => {
+    const items = choiceWargearItems.filter(ci => ci.loadoutChoiceId === c.id).map(ci => {
+      const item = wargearItemMap.get(String(ci.wargearItemId));
+      const profiles = allProfiles.filter(p => p.wargearItemId === ci.wargearItemId).map(p => {
+        const rules = profileAbilities.filter(pa => pa.wargearItemProfileId === p.id).map(pa => String(pa.name));
+        return { name: p.name || item?.name, type: p.type, range: p.range, attacks: p.attacks, ballisticSkill: p.ballisticSkill, weaponSkill: p.weaponSkill, strength: p.strength, armourPenetration: p.armourPenetration, damage: p.damage, rules: rules };
+      });
+      return { name: String(item?.name), wargearType: String(item?.wargearType), count: Number(ci.count), profiles: profiles };
     });
+    if (!choiceMap.has(String(c.loadoutChoiceSetId))) choiceMap.set(String(c.loadoutChoiceSetId), []);
+    choiceMap.get(String(c.loadoutChoiceSetId))!.push({ id: c.id, wargearItems: items });
   });
 
-  // 9. Fetch points steps (if any)
-  const datasheetPointsSteps = await query(`
-    SELECT datasheetId, stepAt, stepPoints
-    FROM datasheet_points_step
-    WHERE datasheetId IN (${dsIds})
-    ORDER BY stepAt
-  `);
+  const choiceSetsMap = new Map<string, unknown[]>();
+  choiceSets.forEach(cs => {
+    if (!choiceSetsMap.has(String(cs.datasheetId))) choiceSetsMap.set(String(cs.datasheetId), []);
+    choiceSetsMap.get(String(cs.datasheetId))!.push({ id: cs.id, miniatureId: cs.miniatureId ? String(cs.miniatureId) : null, limit: Number(cs.limit), allowDuplicates: !!cs.allowDuplicates, alternate: !!cs.alternate, choices: choiceMap.get(String(cs.id)) || [] });
+  });
 
-  // 9b. Fetch limited wargear choice sets
+  // 8c. Fetch limited wargear choice sets
   const limitedSets = await query(`
-    SELECT id, datasheetId, miniatureId, mandatory
+    SELECT id, datasheetId, "limit"
     FROM limited_wargear_choice_set
     WHERE datasheetId IN (${dsIds})
   `);
   const limitedSetIds = limitedSets.map(ls => `'${ls.id}'`).join(',');
-
-  const limitedChoices = limitedSetIds ? await query(`
-    SELECT id, limitedWargearChoiceSetId
-    FROM limited_wargear_choice
-    WHERE limitedWargearChoiceSetId IN (${limitedSetIds})
-  `) : [];
+  const limitedChoices = limitedSetIds ? await query(`SELECT id, limitedWargearChoiceSetId FROM limited_wargear_choice WHERE limitedWargearChoiceSetId IN (${limitedSetIds})`) : [];
   const limitedChoiceIds = limitedChoices.map(lc => `'${lc.id}'`).join(',');
-
-  const limitedChoiceItems = limitedChoiceIds ? await query(`
-    SELECT lwcwi.limitedWargearChoiceId, lwcwi.wargearItemId, lwcwi.count
+  const limitedWargearItems = limitedChoiceIds ? await query(`
+    SELECT lwcwi.limitedWargearChoiceId, lwcwi.count, lwcwi.wargearItemId
     FROM limited_wargear_choice_wargear_item lwcwi
     WHERE lwcwi.limitedWargearChoiceId IN (${limitedChoiceIds})
   `) : [];
 
-  const limitedLimits = limitedSetIds ? await query(`
-    SELECT limitedWargearChoiceSetId, modelCount, choiceLimit, duplicateLimit
-    FROM wargear_limit
-    WHERE limitedWargearChoiceSetId IN (${limitedSetIds})
-  `) : [];
-
-  // Group limited sets by datasheet
-  const limitedSetsMap = new Map<string, LimitedWargearChoiceSet[]>();
-  limitedSets.forEach(ls => {
-    const lsChoices = limitedChoices
-      .filter(lc => lc.limitedWargearChoiceSetId === ls.id)
-      .map(lc => {
-        const itemIds = limitedChoiceItems
-          .filter(lci => lci.limitedWargearChoiceId === lc.id)
-          .map(lci => String(lci.wargearItemId));
-        return {
-          id: String(lc.id),
-          wargearItemIds: itemIds
-        } as LimitedWargearChoice;
-      })
-      .filter(choice => choice.wargearItemIds.length > 0);
-
-    const lsLimits = limitedLimits
-      .filter(lim => lim.limitedWargearChoiceSetId === ls.id)
-      .map(lim => ({
-        modelCount: Number(lim.modelCount),
-        choiceLimit: Number(lim.choiceLimit),
-        duplicateLimit: lim.duplicateLimit != null ? Number(lim.duplicateLimit) : null
-      }) as WargearLimit);
-
-    const key = String(ls.datasheetId);
-    if (!limitedSetsMap.has(key)) {
-      limitedSetsMap.set(key, []);
-    }
-    limitedSetsMap.get(key)!.push({
-      id: String(ls.id),
-      miniatureId: ls.miniatureId ? String(ls.miniatureId) : null,
-      mandatory: !!ls.mandatory,
-      limits: lsLimits,
-      choices: lsChoices
+  const limitedChoiceMap = new Map<string, unknown[]>();
+  limitedChoices.forEach(lc => {
+    const items = limitedWargearItems.filter(ci => ci.limitedWargearChoiceId === lc.id).map(ci => {
+      const item = wargearItemMap.get(String(ci.wargearItemId));
+      const profiles = allProfiles.filter(p => p.wargearItemId === ci.wargearItemId).map(p => {
+        const rules = profileAbilities.filter(pa => pa.wargearItemProfileId === p.id).map(pa => String(pa.name));
+        return { name: p.name || item?.name, type: p.type, range: p.range, attacks: p.attacks, ballisticSkill: p.ballisticSkill, weaponSkill: p.weaponSkill, strength: p.strength, armourPenetration: p.armourPenetration, damage: p.damage, rules: rules };
+      });
+      return { name: String(item?.name), wargearType: String(item?.wargearType), count: Number(ci.count), profiles: profiles };
     });
+    if (!limitedChoiceMap.has(String(lc.limitedWargearChoiceSetId))) limitedChoiceMap.set(String(lc.limitedWargearChoiceSetId), []);
+    limitedChoiceMap.get(String(lc.limitedWargearChoiceSetId))!.push({ id: lc.id, wargearItems: items });
   });
 
-  // Assemble
-  const miniMap = new Map<string, Record<string, unknown>>();
+  const limitedSetsMap = new Map<string, unknown[]>();
+  limitedSets.forEach(ls => {
+    if (!limitedSetsMap.has(String(ls.datasheetId))) limitedSetsMap.set(String(ls.datasheetId), []);
+    limitedSetsMap.get(String(ls.datasheetId))!.push({ id: ls.id, limit: Number(ls.limit), choices: limitedChoiceMap.get(String(ls.id)) || [] });
+  });
+
+  // 8d. Fetch wargear limits
+  const wargearLimits = await query(`
+    SELECT datasheetId, wargearItemId, limitCount, ratioModelCount
+    FROM wargear_limit
+    WHERE datasheetId IN (${dsIds})
+  `);
+  const limitsMap = new Map<string, unknown[]>();
+  wargearLimits.forEach(wl => {
+    if (!limitsMap.has(String(wl.datasheetId))) limitsMap.set(String(wl.datasheetId), []);
+    limitsMap.get(String(wl.datasheetId))!.push({ wargearItemId: String(wl.wargearItemId), wargearItemName: String(wargearItemMap.get(String(wl.wargearItemId))?.name || ''), limitCount: Number(wl.limitCount), ratioModelCount: wl.ratioModelCount != null ? Number(wl.ratioModelCount) : null });
+  });
+
+  // 9. Fetch points steps
+  const datasheetPointsSteps = await query(`SELECT datasheetId, stepAt, stepPoints FROM datasheet_points_step WHERE datasheetId IN (${dsIds}) ORDER BY stepAt`);
+
+  const miniMap = new Map();
   miniatures.forEach(m => {
     const kws = miniKeywords.filter(k => k.miniatureId === m.id).map(k => String(k.name));
-    const sets = [
-      ...(choiceSetMap.get(String(m.id)) || []),
-      ...(choiceSetMap.get(String(m.datasheetId)) || [])
-    ];
-    miniMap.set(String(m.id), {
-      id: m.id,
-      name: m.name,
-      statlineHidden: !!m.statlineHidden,
-      stats: { M: m.M, T: m.T, Sv: m.Sv, W: m.W, Ld: m.Ld, OC: m.OC, Inv: invForMini(m.datasheetId, m.id) },
-      keywords: kws,
-      weapons: miniWeaponsMap.get(String(m.id)) || [],
-      wargearChoiceSets: sets,
-    });
+    miniMap.set(String(m.id), { id: m.id, name: m.name, statlineHidden: !!m.statlineHidden, stats: { M: String(m.M), T: String(m.T), Sv: String(m.Sv), W: String(m.W), Ld: String(m.Ld), OC: String(m.OC), Inv: invForMini(m.datasheetId, m.id) }, keywords: kws, weapons: miniWeaponsMap.get(String(m.id)) || [], choiceSets: (choiceSetsMap.get(String(m.datasheetId)) || []).filter((cs: { miniatureId: string | null }) => cs.miniatureId === m.id) });
   });
 
   const compMap = new Map<string, unknown[]>();
   compositions.forEach(c => {
-    const models = compModels.filter(cm => cm.unitCompositionId === c.id).map(cm => ({
-      miniature: cm.miniature,
-      min: cm.min,
-      max: cm.max,
-    }));
+    const models = compModels.filter(cm => cm.unitCompositionId === c.id).map(cm => ({ miniature: cm.miniature, min: cm.min, max: cm.max }));
+    const reqFactionIds = compRequiredFactions.filter(rf => rf.unitCompositionId === c.id).map(rf => String(rf.factionKeywordId));
+    const reqDetachmentIds = compRequiredDetachments.filter(rd => rd.unitCompositionId === c.id).map(rd => String(rd.detachmentId));
     if (!compMap.has(String(c.datasheetId))) compMap.set(String(c.datasheetId), []);
-    compMap.get(String(c.datasheetId))!.push({
-      id: c.id,
-      isDefault: !!c.isDefault,
-      points: Number(c.points),
-      models: models,
-    });
+    compMap.get(String(c.datasheetId))!.push({ id: c.id, isDefault: !!c.isDefault, points: Number(c.points), models: models, referenceGroupingKeywordId: c.referenceGroupingKeywordId ? String(c.referenceGroupingKeywordId) : null, referenceGroupingKeywordName: c.referenceGroupingKeywordName ? String(c.referenceGroupingKeywordName) : null, requiredFactionKeywordIds: reqFactionIds, requiredDetachmentIds: reqDetachmentIds });
   });
 
   const abilityMap = new Map<string, unknown[]>();
   abilities.forEach(a => {
     if (!abilityMap.has(String(a.datasheetId))) abilityMap.set(String(a.datasheetId), []);
-    abilityMap.get(String(a.datasheetId))!.push({
-      name: a.name,
-      type: a.type,
-      isAura: !!a.isAura,
-      isPsychic: !!a.isPsychic,
-      rules: a.rules,
-    });
+    abilityMap.get(String(a.datasheetId))!.push({ name: a.name, type: a.type, isAura: !!a.isAura, isPsychic: !!a.isPsychic, rules: a.rules });
   });
 
   const rulesMap = new Map<string, unknown[]>();
   datasheetRules.forEach(r => {
     if (!rulesMap.has(String(r.datasheetId))) rulesMap.set(String(r.datasheetId), []);
-    rulesMap.get(String(r.datasheetId))!.push({
-      name: String(r.name),
-      rules: String(r.rules),
-    });
+    rulesMap.get(String(r.datasheetId))!.push({ name: String(r.name), rules: String(r.rules) });
   });
 
   const bodyguardMap = new Map<string, string[]>();
   bodyguardGroups.forEach(bg => {
-    const names = bgDatasheets
-      .filter(d => d.datasheetBodyguardGroupId === bg.id)
-      .map(d => String(d.name));
-    const kws = bgKeywords
-      .filter(k => k.datasheetBodyguardGroupId === bg.id)
-      .map(k => String(k.name));
-
-    if (!bodyguardMap.has(String(bg.datasheetId))) {
-      bodyguardMap.set(String(bg.datasheetId), []);
-    }
+    const names = bgDatasheets.filter(d => d.datasheetBodyguardGroupId === bg.id).map(d => String(d.name));
+    const kws = bgKeywords.filter(k => k.datasheetBodyguardGroupId === bg.id).map(k => String(k.name));
+    if (!bodyguardMap.has(String(bg.datasheetId))) bodyguardMap.set(String(bg.datasheetId), []);
     bodyguardMap.get(String(bg.datasheetId))!.push(...names, ...kws);
   });
 
@@ -628,22 +524,97 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     lore: ds.lore,
     maxModelCount: ds.maxModelCount,
     isFreeFromEntitlements: !!ds.isFreeFromEntitlements,
-    factionKeywords: datasheetFactionKeywords
-      .filter(dfk => dfk.datasheetId === ds.id)
-      .map(dfk => String(dfk.name)),
+    factionKeywords: datasheetFactionKeywords.filter(dfk => dfk.datasheetId === ds.id).map(dfk => String(dfk.name)),
     models: miniatures.filter(m => m.datasheetId === ds.id).map(m => miniMap.get(String(m.id))),
     compositions: compMap.get(String(ds.id)) || [],
     abilities: abilityMap.get(String(ds.id)) || [],
     rules: rulesMap.get(String(ds.id)) || [],
-    pointsSteps: datasheetPointsSteps
-      .filter(dps => dps.datasheetId === ds.id)
-      .map(dps => ({ stepAt: dps.stepAt, stepPoints: dps.stepPoints })),
-    damageProfiles: damageRows
-      .filter(dr => dr.datasheetId === ds.id)
-      .map(dr => ({ name: String(dr.name), damagedAt: dr.damagedAt != null ? String(dr.damagedAt) : null, rules: String(dr.rules ?? '') })),
+    pointsSteps: datasheetPointsSteps.filter(dps => dps.datasheetId === ds.id).map(dps => ({ stepAt: dps.stepAt, stepPoints: dps.stepPoints })),
+    damageProfiles: damageRows.filter(dr => dr.datasheetId === ds.id).map(dr => ({ name: String(dr.name), damagedAt: dr.damagedAt != null ? String(dr.damagedAt) : null, rules: String(dr.rules ?? '') })),
     leads: bodyguardMap.get(String(ds.id)) || [],
     limitedWargearChoiceSets: limitedSetsMap.get(String(ds.id)) || [],
+    wargearLimits: limitsMap.get(String(ds.id)) || [],
   }));
+}
+
+/**
+ * Fetches allied units (datasheets) for a specific faction, optionally filtered by detachment rules.
+ */
+export const getAlliedUnitsForFaction = async (
+  factionSlug: string
+): Promise<Record<string, unknown>[]> => {
+  const kwIds = await getFactionKeywordIds(factionSlug);
+  if (kwIds.length === 0) return [];
+  const idList = kwIds.map(id => `'${id}'`).join(',');
+  const alliedFactions = await query(`SELECT alliedFactionId FROM faction_keyword_allied_faction WHERE factionKeywordId IN (${idList})`);
+  if (alliedFactions.length === 0) return [];
+
+  const afIds = alliedFactions.map(af => `'${af.alliedFactionId}'`).join(',');
+
+  // Fetch all allowed datasheets for these allied factions, along with any required detachments
+  const alliedDatasheets = await query(`
+    SELECT DISTINCT afd.datasheetId, afrd.detachmentId
+    FROM allied_faction_datasheet afd
+    LEFT JOIN allied_faction_required_detachment afrd ON afd.alliedFactionId = afrd.alliedFactionId
+    WHERE afd.alliedFactionId IN (${afIds})
+  `);
+  if (alliedDatasheets.length === 0) return [];
+
+  // Group by datasheetId to collect required detachment IDs
+  const dsDetMap = new Map<string, string[]>();
+  alliedDatasheets.forEach(ad => {
+    const dsId = String(ad.datasheetId);
+    if (!dsDetMap.has(dsId)) dsDetMap.set(dsId, []);
+    if (ad.detachmentId) {
+      dsDetMap.get(dsId)!.push(String(ad.detachmentId));
+    }
+  });
+
+  const dsIdList = Array.from(dsDetMap.keys()).map(id => `'${id}'`).join(',');
+
+  const datasheets = await query(`
+    SELECT d.id, d.name, d.unitComposition as compositionRules, p.name as publication, d.lore, d.maxModelCount, d.isFreeFromEntitlements
+    FROM datasheet d
+    LEFT JOIN publication p ON d.publicationId = p.id
+    WHERE d.id IN (${dsIdList})
+  `);
+
+  if (datasheets.length === 0) return [];
+  const assembled = await assembleDatasheets(datasheets);
+
+  return assembled.map(ds => ({
+    ...ds,
+    requiredDetachmentIds: dsDetMap.get(String(ds.id)) || [],
+  }));
+};
+
+/**
+ * Fetches slot/count limits for all allied factions linked to a specific faction.
+ */
+export const getAlliedLimitsForFaction = async (factionSlug: string): Promise<Record<string, unknown>[]> => {
+  const kwIds = await getFactionKeywordIds(factionSlug);
+  if (kwIds.length === 0) return [];
+  const idList = kwIds.map(id => `'${id}'`).join(',');
+  const alliedFactions = await query(`SELECT alliedFactionId FROM faction_keyword_allied_faction WHERE factionKeywordId IN (${idList})`);
+  if (alliedFactions.length === 0) return [];
+  const afList = alliedFactions.map(af => `'${af.alliedFactionId}'`).join(',');
+
+  const keywordLimits = await query(`
+    SELECT afk.alliedFactionId, k.name AS keyword, afk.limitCount, bs.name AS battleSize
+    FROM allied_faction_keyword afk
+    JOIN keyword k ON afk.keywordId = k.id
+    LEFT JOIN battle_size bs ON afk.battleSizeId = bs.id
+    WHERE afk.alliedFactionId IN (${afList})
+  `);
+
+  const pointsLimits = await query(`
+    SELECT afpl.alliedFactionId, 'Points' AS keyword, afpl.pointsLimit AS limitCount, bs.name AS battleSize
+    FROM allied_faction_points_limit afpl
+    LEFT JOIN battle_size bs ON afpl.battleSizeId = bs.id
+    WHERE afpl.alliedFactionId IN (${afList})
+  `);
+
+  return [...keywordLimits, ...pointsLimits];
 };
 
 /**

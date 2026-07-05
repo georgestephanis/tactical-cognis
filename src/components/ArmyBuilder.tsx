@@ -750,6 +750,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [catalogRole, setCatalogRole] = useState<string>('all');
 
+  const findCatalogUnit = (slug: string) => {
+    if (!factionData) return undefined;
+    return factionData.units.find(u => u.slug === slug) || factionData.alliedUnits?.find(u => u.slug === slug);
+  };
+
   // Roster persistence and printing states
   const [savedArmies, setSavedArmies] = useState<ArmyList[]>(() => {
     const raw = localStorage.getItem('tactical_cognis_armies');
@@ -886,7 +891,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // Check character compatibility with bodyguard squad
   const checkCompatibility = (character: RosterUnit, bodyguard: RosterUnit): boolean => {
     if (!factionData) return false;
-    const unit = factionData.units.find(u => u.slug === character.unitSlug);
+    const unit = findCatalogUnit(character.unitSlug);
     const datasheet = unit?.appDatasheet;
     if (!datasheet) return false;
 
@@ -1117,7 +1122,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     const isBattleline = keywords.some(k => k.toLowerCase() === 'battleline');
 
     // Determine initial cost option
-    const costs = getDatasheetCosts(mergedUnit.appDatasheet);
+    const selectedDetachmentId = selectedDetachmentSlugs[0] ? factionData.detachments.find(d => d.slug === selectedDetachmentSlugs[0])?.id : null;
+    const costs = getDatasheetCosts(mergedUnit.appDatasheet, factionData.factionKeywordIds || [], selectedDetachmentId, factionData.slug);
     let initialCost = 0;
     let initialModels = 1;
 
@@ -1160,8 +1166,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     setRoster(prev => prev.map(u => {
       if (u.id !== id) return u;
 
-      const merged = factionData.units.find(mu => mu.slug === u.unitSlug);
-      const costs = getDatasheetCosts(merged?.appDatasheet);
+      const merged = findCatalogUnit(u.unitSlug);
+      const selectedDetachmentId = selectedDetachmentSlugs[0] ? factionData.detachments.find(d => d.slug === selectedDetachmentSlugs[0])?.id : null;
+      const costs = getDatasheetCosts(merged?.appDatasheet, factionData.factionKeywordIds || [], selectedDetachmentId, factionData.slug);
 
       let points = 0;
       let modelsCount = 1;
@@ -1274,13 +1281,33 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }, 0);
   };
 
+  const selectedDetachments = factionData
+    ? selectedDetachmentSlugs
+        .map(slug => factionData.detachments.find(d => d.slug === slug))
+        .filter((d): d is MergedDetachment => !!d)
+    : [];
+
   // Filter list of catalog units
-  const filteredCatalog = factionData ? factionData.units.filter(unit => {
+  const filteredCatalog = factionData ? [...factionData.units, ...(factionData.alliedUnits || [])].filter(unit => {
     if (unit.isCombatPatrol || unit.pointsRange.min === 0) return false;
+
+    // Detachment gating for allied units
+    if (unit.isAllied && unit.requiredDetachmentIds && unit.requiredDetachmentIds.length > 0) {
+      const activeDetachment = selectedDetachments[0];
+      if (!activeDetachment || !unit.requiredDetachmentIds.includes(activeDetachment.id)) return false;
+    }
+
     const matchesSearch = unit.name.toLowerCase().includes(searchQuery.toLowerCase());
     if (!matchesSearch) return false;
 
-    if (catalogRole === 'all') return true;
+    if (catalogRole === 'all') {
+      return !unit.isAllied;
+    }
+    if (catalogRole === 'allies') {
+      return !!unit.isAllied;
+    }
+
+    if (unit.isAllied) return false;
 
     const firstModel = unit.appDatasheet?.models?.[0];
     const keywords = firstModel?.keywords || [];
@@ -1306,12 +1333,6 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const detachmentPointsLimit = applicableBattleSize?.detachmentPointsLimit ?? 3;
   const enhancementLimit = applicableBattleSize?.enhancementLimit ?? 3;
   const duplicateUnitLimit = applicableBattleSize?.duplicateUnitLimit ?? 3;
-
-  const selectedDetachments = factionData
-    ? selectedDetachmentSlugs
-        .map(slug => factionData.detachments.find(d => d.slug === slug))
-        .filter((d): d is MergedDetachment => !!d)
-    : [];
   const usedDetachmentPoints = selectedDetachments.reduce((sum, d) => sum + (d.detachmentPointsCost || 0), 0);
 
   // Roster validation, derived directly from current state on each render
@@ -1394,7 +1415,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     // 6. Squad-level limited wargear checks
     roster.forEach(u => {
-      const matched = factionData.units.find(mu => mu.slug === u.unitSlug);
+      const matched = findCatalogUnit(u.unitSlug);
       const ds = matched?.appDatasheet;
       if (!ds || !ds.limitedWargearChoiceSets || ds.limitedWargearChoiceSets.length === 0) return;
 
@@ -1432,6 +1453,57 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         }
       });
     });
+
+    // 7. Allied units count & points validation
+    if (factionData.alliedLimits) {
+      const alliedRosterUnits = roster.filter(u => {
+        const catalog = findCatalogUnit(u.unitSlug);
+        return catalog?.isAllied;
+      });
+
+      if (alliedRosterUnits.length > 0) {
+        // A. Points validation
+        const alliedPointsTotal = alliedRosterUnits.reduce((sum, u) => sum + u.points, 0);
+        const pointsLimitRecord = factionData.alliedLimits.find(
+          l => l.keyword === 'Points' && (l.battleSize === null || l.battleSize === applicableBattleSize?.name)
+        );
+        if (pointsLimitRecord && alliedPointsTotal > pointsLimitRecord.limitCount) {
+          validationErrors.push(
+            `Allied Force exceeds points limit: spent ${alliedPointsTotal} pts on allied units (Max is ${pointsLimitRecord.limitCount} pts).`
+          );
+        }
+
+        // B. Keyword limits validation (Characters, Retinues, Titanic, War Dogs, etc.)
+        const keywordCounts: Record<string, number> = {};
+        alliedRosterUnits.forEach(u => {
+          const catalog = findCatalogUnit(u.unitSlug);
+          const firstModel = catalog?.appDatasheet?.models?.[0];
+          const keywords = firstModel?.keywords || [];
+
+          keywords.forEach(kw => {
+            const normKw = kw.trim();
+            factionData.alliedLimits!.forEach(limit => {
+              if (limit.keyword === 'Points') return;
+              if (limit.keyword.toLowerCase() === normKw.toLowerCase()) {
+                keywordCounts[limit.keyword] = (keywordCounts[limit.keyword] || 0) + 1;
+              }
+            });
+          });
+        });
+
+        factionData.alliedLimits.forEach(limit => {
+          if (limit.keyword === 'Points') return;
+          if (limit.battleSize && limit.battleSize !== applicableBattleSize?.name) return;
+
+          const count = keywordCounts[limit.keyword] || 0;
+          if (count > limit.limitCount) {
+            validationErrors.push(
+              `Allied Force exceeds limit for "${limit.keyword}" units: added ${count} (Max is ${limit.limitCount} for ${applicableBattleSize?.name || 'this game size'}).`
+            );
+          }
+        });
+      }
+    }
   }
 
   // Helper selectors
@@ -1920,7 +1992,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   { id: 'all', label: 'All' },
                   { id: 'character', label: 'Leaders' },
                   { id: 'infantry', label: 'Infantry' },
-                  { id: 'vehicle', label: 'Vehicles' }
+                  { id: 'vehicle', label: 'Vehicles' },
+                  ...(factionData?.alliedUnits && factionData.alliedUnits.length > 0 ? [{ id: 'allies', label: 'Allies' }] : [])
                 ].map(r => (
                   <button
                     key={r.id}
@@ -1944,7 +2017,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               {/* Scrollable List */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '55vh', overflowY: 'auto' }}>
                 {filteredCatalog.map(unit => {
-                  const pts = getDatasheetCosts(unit.appDatasheet)[0]?.points || 0;
+                  const selectedDetachmentId = selectedDetachmentSlugs[0] ? factionData?.detachments.find(d => d.slug === selectedDetachmentSlugs[0])?.id : null;
+                  const pts = getDatasheetCosts(unit.appDatasheet, factionData?.factionKeywordIds || [], selectedDetachmentId, factionData?.slug)[0]?.points || 0;
 
                   return (
                     <div key={unit.slug} className="catalog-item">
@@ -2172,7 +2246,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   </thead>
                   <tbody>
                     {roster.map(unit => {
-                      const matched = factionData.units.find(mu => mu.slug === unit.unitSlug);
+                      const matched = findCatalogUnit(unit.unitSlug);
                       const ds = matched?.appDatasheet;
                       const firstModel = ds?.models?.[0];
                       const stats = firstModel?.stats;
@@ -2266,7 +2340,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         }
                         return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount }];
                       }).map(unit => {
-                        const matched = factionData.units.find(mu => mu.slug === unit.unitSlug);
+                        const matched = findCatalogUnit(unit.unitSlug);
                         const ds = matched?.appDatasheet;
                         if (!ds || !ds.models) return null;
 
@@ -2336,7 +2410,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   }
                   return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount }];
                 }).map(unit => {
-                  const matched = factionData.units.find(mu => mu.slug === unit.unitSlug);
+                  const matched = findCatalogUnit(unit.unitSlug);
                   const ds = matched?.appDatasheet;
                   const firstModel = ds?.models?.[0];
                   const stats = firstModel?.stats;
@@ -2474,11 +2548,12 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     if (!factionData) return null;
 
     // Find original merged unit definition
-    const matchedCatalog = factionData.units.find(u => u.slug === unit.unitSlug);
+    const matchedCatalog = findCatalogUnit(unit.unitSlug);
     const isWarlord = unit.isWarlord;
 
     // Available size options
-    const costOptions = getDatasheetCosts(matchedCatalog?.appDatasheet);
+    const selectedDetachmentId = selectedDetachmentSlugs[0] ? factionData.detachments.find(d => d.slug === selectedDetachmentSlugs[0])?.id : null;
+    const costOptions = getDatasheetCosts(matchedCatalog?.appDatasheet, factionData.factionKeywordIds || [], selectedDetachmentId, factionData.slug);
 
     // Enhancements are offered from every selected detachment (grouped when several)
 

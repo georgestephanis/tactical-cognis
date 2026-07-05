@@ -88,9 +88,20 @@ export interface CompositionModel {
 }
 
 export interface Composition {
+  id?: string;
   isDefault: boolean;
   points: number;
   models: CompositionModel[];
+  referenceGroupingKeywordId?: string | null;
+  referenceGroupingKeywordName?: string | null;
+  requiredFactionKeywordIds?: string[];
+  requiredDetachmentIds?: string[];
+}
+
+export interface AlliedLimit {
+  keyword: string;
+  limitCount: number;
+  battleSize: string | null;
 }
 
 export interface PointsStep {
@@ -212,6 +223,8 @@ export interface MergedUnit {
   pointsRange: { min: number; max: number };
   isCombatPatrol: boolean;
   isFactionPack?: boolean;
+  isAllied?: boolean;
+  requiredDetachmentIds?: string[];
 }
 
 export interface RosterUnit {
