@@ -456,9 +456,10 @@ function generateRosterText(
     if (battleline.length > 0) {
       lines.push('**BATTLELINE**');
       battleline.forEach(u => {
+        const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
         const wargear = getRosterUnitWargear(u, factionData);
         const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
-        lines.push(`* **${u.name}** (${u.points} points)${wargearSuffix}`);
+        lines.push(`* **${u.name}${splitTag}** (${u.points} points)${wargearSuffix}`);
       });
       lines.push('');
     }
@@ -466,9 +467,10 @@ function generateRosterText(
     if (other.length > 0) {
       lines.push('**OTHER DATASHEETS**');
       other.forEach(u => {
+        const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
         const wargear = getRosterUnitWargear(u, factionData);
         const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
-        lines.push(`* **${u.name}** (${u.points} points)${wargearSuffix}`);
+        lines.push(`* **${u.name}${splitTag}** (${u.points} points)${wargearSuffix}`);
       });
       lines.push('');
     }
@@ -486,10 +488,11 @@ function generateRosterText(
 
     roster.forEach((u, idx) => {
       const warlordSuffix = u.isWarlord ? ' - WARLORD' : '';
+      const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
       const wargear = getRosterUnitWargear(u, factionData);
       const wargearSuffix = wargear.length > 0 ? ` (${wargear.join(', ')})` : '';
       const enhSuffix = u.enhancementName ? ` - Enhancement: ${u.enhancementName}` : '';
-      lines.push(`UNIT ${idx + 1}: ${u.name}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${u.points + (u.enhancementPoints || 0)} pts]`);
+      lines.push(`UNIT ${idx + 1}: ${u.name}${splitTag}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${u.points + (u.enhancementPoints || 0)} pts]`);
     });
 
     return lines.join('\n');
@@ -502,7 +505,8 @@ function generateRosterText(
 
   roster.forEach(u => {
     const warlordSuffix = u.isWarlord ? ', Warlord' : '';
-    lines.push(`• ${u.name}${warlordSuffix} (${u.points + (u.enhancementPoints || 0)} pts)`);
+    const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
+    lines.push(`• ${u.name}${splitTag}${warlordSuffix} (${u.points + (u.enhancementPoints || 0)} pts)`);
     if (u.enhancementName) {
       lines.push(`  • Enhancement: ${u.enhancementName}`);
     }
@@ -560,6 +564,42 @@ function getRosterUnitModelCounts(unit: RosterUnit, datasheet: Datasheet): Recor
   }
 
   return counts;
+}
+
+/**
+ * Checks if a squad is eligible to split (Combat Squad / Combat Patrol Split).
+ */
+function canUnitSplit(
+  unitName: string,
+  modelCount: number,
+  abilities: Ability[],
+  rules: DatasheetRule[]
+): boolean {
+  if (modelCount !== 10) return false;
+
+  const selfSplitAbilities = ['combat squad', 'combat squads', 'let loose the wolves'];
+  const hasSelfSplit =
+    abilities.some(a => selfSplitAbilities.includes(a.name.toLowerCase())) ||
+    rules.some(r => r.name.toLowerCase() === 'patrol squad');
+
+  if (hasSelfSplit) return true;
+
+  const normName = unitName.toLowerCase();
+  const transportSplitUnits = [
+    'kabalite warriors',
+    'hand of the archon',
+    'wyches',
+    'battle sisters squad',
+    'dominion squad',
+    'sisters novitiate squad',
+    'hearthkyn warriors',
+    'hernkyn yaegirs',
+    'hernkyn yaegir'
+  ];
+
+  if (transportSplitUnits.some(u => normName.includes(u))) return true;
+
+  return false;
 }
 
 /**
@@ -1163,6 +1203,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       // Max 1 warlord total, so turn off others
       if (u.isWarlord) {
         return { ...u, isWarlord: false };
+      }
+      return u;
+    }));
+  };
+
+  // Toggle split squad status
+  const handleToggleSplitSquad = (id: string) => {
+    setRoster(prev => prev.map(u => {
+      if (u.id === id) {
+        return { ...u, splitSquad: !u.splitSquad };
       }
       return u;
     }));
@@ -2207,7 +2257,15 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {roster.map(unit => {
+                      {roster.flatMap(unit => {
+                        if (unit.splitSquad) {
+                          return [
+                            { ...unit, id: `${unit.id}-squad-a`, virtualName: `${unit.name} (Squad A)`, virtualModelsCount: 5 },
+                            { ...unit, id: `${unit.id}-squad-b`, virtualName: `${unit.name} (Squad B)`, virtualModelsCount: 5 }
+                          ];
+                        }
+                        return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount }];
+                      }).map(unit => {
                         const matched = factionData.units.find(mu => mu.slug === unit.unitSlug);
                         const ds = matched?.appDatasheet;
                         if (!ds || !ds.models) return null;
@@ -2234,7 +2292,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                               weaponRows.push(
                                 <tr key={key} style={{ fontSize: '8.5pt' }}>
                                   <td>
-                                    <strong>{unit.name}</strong>
+                                    <strong>{unit.virtualName}</strong>
                                     <div style={{ fontSize: '8pt', color: '#4b5563' }}>
                                       {weapon.name} {prof.name !== weapon.name ? `(${prof.name})` : ''}
                                     </div>
@@ -2269,7 +2327,15 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
             ) : (
               // 2. ISO/IEC 7810 ID-1 Datacards Print Grid
               <div className="print-cards-grid">
-                {roster.map(unit => {
+                {roster.flatMap(unit => {
+                  if (unit.splitSquad) {
+                    return [
+                      { ...unit, id: `${unit.id}-squad-a`, virtualName: `${unit.name} (Squad A)`, virtualModelsCount: 5 },
+                      { ...unit, id: `${unit.id}-squad-b`, virtualName: `${unit.name} (Squad B)`, virtualModelsCount: 5 }
+                    ];
+                  }
+                  return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount }];
+                }).map(unit => {
                   const matched = factionData.units.find(mu => mu.slug === unit.unitSlug);
                   const ds = matched?.appDatasheet;
                   const firstModel = ds?.models?.[0];
@@ -2320,10 +2386,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                       <div className="id1-datacard-header">
                         <div className="id1-datacard-title">
                           {unit.isWarlord && <Crown size={8} style={{ display: 'inline', marginRight: '2px', verticalAlign: 'middle' }} />}
-                          {unit.name}
+                          {unit.virtualName}
                         </div>
                         <div className="id1-datacard-points">
-                          {unit.points + (unit.enhancementPoints || 0)} pts | {unit.modelsCount} mdl
+                          {unit.splitSquad ? `${unit.points / 2} pts (Split)` : `${unit.points + (unit.enhancementPoints || 0)} pts`} | {unit.virtualModelsCount} mdl
                         </div>
                       </div>
 
@@ -2434,10 +2500,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 {unit.isCharacter && <span className="badge badge-character">Character</span>}
                 {unit.isBattleline && <span className="badge badge-infantry" style={{ fontSize: '0.6rem' }}>Battleline</span>}
                 {unit.isFactionPack && <span className="badge badge-faction-pack">FP</span>}
+                {unit.splitSquad && <span className="badge badge-infantry" style={{ background: 'rgba(20, 184, 166, 0.2)', color: 'var(--accent-teal)', borderColor: 'rgba(20, 184, 166, 0.4)', fontSize: '0.6rem' }}>SPLIT SQUAD</span>}
               </div>
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', marginTop: '0.15rem' }}>
-              Base Cost: {unit.points} pts | {unit.modelsCount} models
+              Base Cost: {unit.points} pts | {unit.modelsCount} models {unit.splitSquad && ' (Split into 2x 5 models)'}
             </div>
           </div>
 
@@ -2580,6 +2647,31 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 />
                 Warlord
               </label>
+
+              {/* 5. Split Squad switch (eligible squads only) */}
+              {canUnitSplit(unit.name, unit.modelsCount, matchedCatalog?.appDatasheet?.abilities || [], matchedCatalog?.appDatasheet?.rules || []) && (
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    color: unit.splitSquad ? 'var(--accent-teal)' : 'var(--text-secondary)',
+                    userSelect: 'none',
+                    marginLeft: unit.isCharacter ? '1rem' : 'auto',
+                    fontWeight: unit.splitSquad ? 700 : 400
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={unit.splitSquad || false}
+                    onChange={() => handleToggleSplitSquad(unit.id)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Combat Squad Split
+                </label>
+              )}
             </>
           )}
 

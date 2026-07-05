@@ -112,6 +112,11 @@ export interface DamageProfile {
   rules: string;
 }
 
+export interface DatasheetRule {
+  name: string;
+  rules: string;
+}
+
 export interface Datasheet {
   id: string;
   name: string;
@@ -128,6 +133,7 @@ export interface Datasheet {
   pointsSteps: PointsStep[];
   abilities: Ability[];
   damageProfiles: DamageProfile[];
+  rules?: DatasheetRule[];
   leads?: string[];
   limitedWargearChoiceSets?: LimitedWargearChoiceSet[];
 }
@@ -224,6 +230,7 @@ export interface RosterUnit {
   isWarlord?: boolean;
   selectedWargearChoices?: Record<string, string[]>; // choiceSetId -> choiceId[]
   wargearCounts?: Record<string, number>; // choiceId -> count selected
+  splitSquad?: boolean; // Indicates if the squad is split into two pre-game
 }
 
 export interface ArmyList {

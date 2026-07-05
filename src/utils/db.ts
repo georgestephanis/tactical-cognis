@@ -303,6 +303,14 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     ORDER BY dda.displayOrder
   `);
 
+  // 6b. Fetch datasheet rules (like Patrol Squad)
+  const datasheetRules = await query(`
+    SELECT datasheetId, name, rules
+    FROM datasheet_rule
+    WHERE datasheetId IN (${dsIds})
+    ORDER BY displayOrder
+  `);
+
   // 7. Fetch bodyguard/leader relationships
   const bodyguardGroups = await query(`
     SELECT dbg.id, dbg.datasheetId, dbg.bodyguardType
@@ -588,6 +596,15 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     });
   });
 
+  const rulesMap = new Map<string, unknown[]>();
+  datasheetRules.forEach(r => {
+    if (!rulesMap.has(String(r.datasheetId))) rulesMap.set(String(r.datasheetId), []);
+    rulesMap.get(String(r.datasheetId))!.push({
+      name: String(r.name),
+      rules: String(r.rules),
+    });
+  });
+
   const bodyguardMap = new Map<string, string[]>();
   bodyguardGroups.forEach(bg => {
     const names = bgDatasheets
@@ -617,6 +634,7 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
     models: miniatures.filter(m => m.datasheetId === ds.id).map(m => miniMap.get(String(m.id))),
     compositions: compMap.get(String(ds.id)) || [],
     abilities: abilityMap.get(String(ds.id)) || [],
+    rules: rulesMap.get(String(ds.id)) || [],
     pointsSteps: datasheetPointsSteps
       .filter(dps => dps.datasheetId === ds.id)
       .map(dps => ({ stepAt: dps.stepAt, stepPoints: dps.stepPoints })),
