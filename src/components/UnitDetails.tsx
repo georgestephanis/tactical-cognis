@@ -392,7 +392,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                     <div className="datasheet-section-title">Wargear Options</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: 'rgba(0,0,0,0.15)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)', textAlign: 'left' }}>
                       {datasheet.models.map(model => {
-                        const modelSets = model.wargearChoiceSets?.filter(s => s.choices.length > 1) || [];
+                        const modelSets = model.wargearChoiceSets?.filter(s => s.choices.length > 0) || [];
                         if (modelSets.length === 0) return null;
                         return (
                           <div key={model.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -405,7 +405,9 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                               return (
                                 <div key={set.id || idx} style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                                   <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
-                                    Choose up to {set.limit} of the following:
+                                    {set.choices.length === 1
+                                      ? 'Optional Upgrade:'
+                                      : `Choose up to ${set.limit} of the following:`}
                                   </div>
                                   <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                                     {set.choices.map((choice, cidx) => {

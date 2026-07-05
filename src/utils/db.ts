@@ -465,6 +465,7 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
       allowDuplicates: !!cs.allowDuplicates,
       alternate: !!cs.alternate,
       choices: csChoices,
+      miniatureId: cs.miniatureId ? String(cs.miniatureId) : null,
     });
   });
 
@@ -544,7 +545,10 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
   const miniMap = new Map<string, Record<string, unknown>>();
   miniatures.forEach(m => {
     const kws = miniKeywords.filter(k => k.miniatureId === m.id).map(k => String(k.name));
-    const sets = choiceSetMap.get(String(m.id)) || choiceSetMap.get(String(m.datasheetId)) || [];
+    const sets = [
+      ...(choiceSetMap.get(String(m.id)) || []),
+      ...(choiceSetMap.get(String(m.datasheetId)) || [])
+    ];
     miniMap.set(String(m.id), {
       id: m.id,
       name: m.name,

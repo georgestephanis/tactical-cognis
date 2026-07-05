@@ -49,6 +49,7 @@ export interface WargearChoiceSet {
   allowDuplicates: boolean;
   alternate: boolean;
   choices: WargearChoice[];
+  miniatureId?: string | null;
 }
 
 export interface WargearLimit {

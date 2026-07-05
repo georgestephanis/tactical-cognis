@@ -262,8 +262,9 @@ function getRosterUnitModelCounts(unit: RosterUnit, datasheet: Datasheet): Recor
   const comp = datasheet.compositions[unit.selectedCostIndex];
   if (!comp || !comp.models) {
     const counts: Record<string, number> = {};
+    const firstModelId = datasheet.models[0]?.id;
     datasheet.models.forEach(model => {
-      counts[model.name] = model.id === datasheet.models[0].id ? unit.modelsCount : 0;
+      counts[model.name] = model.id === firstModelId ? unit.modelsCount : 0;
     });
     return counts;
   }
@@ -312,12 +313,17 @@ function getUnitActiveWeapons(
     return model.weapons.map(w => ({ ...w, count: w.count * totalModelCount }));
   }
 
-  let activeWeapons: Weapon[] = [];
-  let defaultCount = totalModelCount;
+  const activeWeapons: Weapon[] = [];
+
+  // Track remaining counts of each default weapon individually
+  const defaultWeaponRemaining = new Map<string, number>();
+  model.weapons.forEach(w => {
+    defaultWeaponRemaining.set(w.name, w.count * totalModelCount);
+  });
 
   // Separate choice sets into replacement sets (swaps) and addition sets
   const replacementSets = sets.filter(set =>
-    set.alternate || set.choices.some(choice => 
+    set.alternate || set.choices.some(choice =>
       choice.items.some(item => model.weapons.some(w => w.name === item.name))
     )
   );
@@ -326,53 +332,66 @@ function getUnitActiveWeapons(
 
   // Process replacement sets
   replacementSets.forEach(set => {
-    let selectedSetCount = 0;
+    const maxAllowedForSet = set.miniatureId ? (set.limit * totalModelCount) : set.limit;
+    let remainingAllowed = Math.min(totalModelCount, maxAllowedForSet);
+    let actualSelectedCount = 0;
+
+    // Add selected weapons
     set.choices.forEach(choice => {
       const count = wargearCounts[choice.id] || 0;
-      selectedSetCount += count;
-    });
+      // We don't add weapons if this choice is the default option itself
+      const isDefaultChoice = choice.items.every(item => model.weapons.some(w => w.name === item.name));
+      if (isDefaultChoice) return;
 
-    const actualSelectedCount = Math.min(totalModelCount, selectedSetCount);
-    const setRemainder = totalModelCount - actualSelectedCount;
-    
-    if (setRemainder < defaultCount) {
-      defaultCount = setRemainder;
-    }
-
-    set.choices.forEach(choice => {
-      const count = wargearCounts[choice.id] || 0;
-      if (count > 0) {
+      const allowedCount = Math.min(count, remainingAllowed);
+      if (allowedCount > 0) {
+        actualSelectedCount += allowedCount;
+        remainingAllowed -= allowedCount;
         choice.items.forEach(item => {
           const existing = activeWeapons.find(w => w.name === item.name);
           if (existing) {
-            existing.count += item.count * count;
+            existing.count += item.count * allowedCount;
           } else {
             activeWeapons.push({
               name: item.name,
               wargearType: item.wargearType,
-              count: item.count * count,
+              count: item.count * allowedCount,
               profiles: item.profiles
             });
           }
         });
       }
     });
+
+    // Reduce the count of the default weapons replaced by this choice set
+    const replacedDefaultWeapons = set.alternate
+      ? model.weapons
+      : model.weapons.filter(w =>
+          set.choices.some(choice => choice.items.some(item => item.name === w.name))
+        );
+
+    replacedDefaultWeapons.forEach(w => {
+      const currentRemaining = defaultWeaponRemaining.get(w.name) || 0;
+      const reduction = w.count * actualSelectedCount;
+      defaultWeaponRemaining.set(w.name, Math.max(0, currentRemaining - reduction));
+    });
   });
 
-  // Now add the default weapons scaled by defaultCount
-  if (defaultCount > 0) {
-    model.weapons.forEach(w => {
+  // Now add the default weapons that are still remaining
+  model.weapons.forEach(w => {
+    const remaining = defaultWeaponRemaining.get(w.name) || 0;
+    if (remaining > 0) {
       const existing = activeWeapons.find(aw => aw.name === w.name);
       if (existing) {
-        existing.count += w.count * defaultCount;
+        existing.count += remaining;
       } else {
         activeWeapons.push({
           ...w,
-          count: w.count * defaultCount
+          count: remaining
         });
       }
-    });
-  }
+    }
+  });
 
   // Process addition sets (e.g. Ammo Runts, Grot Orderlies, Seeker Missiles)
   additionSets.forEach(set => {
@@ -1024,9 +1043,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
         // Count how many regular selected choices contain these limited items
         let selectedCount = 0;
+        const seenChoiceIds = new Set<string>();
         ds.models.forEach(model => {
           model.wargearChoiceSets?.forEach(regSet => {
             regSet.choices.forEach(regChoice => {
+              if (seenChoiceIds.has(regChoice.id)) return;
+              seenChoiceIds.add(regChoice.id);
+
               const hasLimitedItem = regChoice.items.some(item => limitedItemIds.has(item.wargearItemId));
               if (hasLimitedItem) {
                 selectedCount += u.wargearCounts?.[regChoice.id] || 0;
@@ -2243,7 +2266,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                             </div>
                           );
                         } else {
-                          const maxAllowed = totalModelCount > 1 ? totalModelCount : set.limit;
+                          const maxAllowed = set.limit * (set.miniatureId ? totalModelCount : 1);
                           const setAllocatedCount = set.choices.reduce((sum, choice) => sum + (unit.wargearCounts?.[choice.id] || 0), 0);
                           const remainder = Math.max(0, maxAllowed - setAllocatedCount);
 
