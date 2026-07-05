@@ -17,7 +17,7 @@ import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/
 import type { MergedFaction } from '../utils/dataMapper';
 import { getBattleSizes } from '../utils/db';
 import type { BattleSize } from '../utils/db';
-import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon } from '../types/data';
+import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet } from '../types/data';
 
 const FACTION_NAMES: Record<string, string> = {
   'adepta-sororitas': 'Adepta Sororitas',
@@ -252,6 +252,170 @@ function parseBattleForgeText(text: string): ParsedRoster {
 // Module-level so the impure calls stay out of render scope (react-hooks/purity).
 function makeRosterUnitId(slug: string): string {
   return `${slug}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/**
+ * Resolves the count of each miniature model type in a squad, handling both fixed models (like characters/sergeants)
+ * and scaling models (like standard troops) based on the unit's active composition and current squad size.
+ */
+function getRosterUnitModelCounts(unit: RosterUnit, datasheet: Datasheet): Record<string, number> {
+  const comp = datasheet.compositions[unit.selectedCostIndex];
+  if (!comp || !comp.models) {
+    const counts: Record<string, number> = {};
+    const firstModelId = datasheet.models[0]?.id;
+    datasheet.models.forEach(model => {
+      counts[model.name] = model.id === firstModelId ? unit.modelsCount : 0;
+    });
+    return counts;
+  }
+
+  const counts: Record<string, number> = {};
+  let scalingModelName: string | null = null;
+  let fixedCountSum = 0;
+
+  comp.models.forEach(cm => {
+    if (cm.min === cm.max) {
+      counts[cm.miniature] = cm.min;
+      fixedCountSum += cm.min;
+    } else {
+      scalingModelName = cm.miniature;
+    }
+  });
+
+  if (scalingModelName) {
+    counts[scalingModelName] = Math.max(0, unit.modelsCount - fixedCountSum);
+  } else {
+    // If all models are marked fixed but don't add up to the squad size,
+    // scale the one with the largest max
+    const scaling = [...comp.models].sort((a, b) => b.max - a.max)[0];
+    if (scaling) {
+      counts[scaling.miniature] = Math.max(0, unit.modelsCount - (fixedCountSum - scaling.min));
+    }
+  }
+
+  return counts;
+}
+
+/**
+ * Calculates active weapons for a model in a squad, taking counts into account.
+ * Overlapping choices replace default weapons, while non-overlapping choices are added.
+ */
+function getUnitActiveWeapons(
+  unit: RosterUnit,
+  model: Model,
+  totalModelCount: number
+): Weapon[] {
+  if (!model.weapons) return [];
+  const wargearCounts = unit.wargearCounts || {};
+
+  const sets = model.wargearChoiceSets || [];
+  if (sets.length === 0) {
+    return model.weapons.map(w => ({ ...w, count: w.count * totalModelCount }));
+  }
+
+  const activeWeapons: Weapon[] = [];
+
+  // Track remaining counts of each default weapon individually
+  const defaultWeaponRemaining = new Map<string, number>();
+  model.weapons.forEach(w => {
+    defaultWeaponRemaining.set(w.name, w.count * totalModelCount);
+  });
+
+  // Separate choice sets into replacement sets (swaps) and addition sets
+  const replacementSets = sets.filter(set =>
+    set.alternate || set.choices.some(choice =>
+      choice.items.some(item => model.weapons.some(w => w.name === item.name))
+    )
+  );
+
+  const additionSets = sets.filter(set => !replacementSets.includes(set));
+
+  // Process replacement sets
+  replacementSets.forEach(set => {
+    const maxAllowedForSet = set.miniatureId ? (set.limit * totalModelCount) : set.limit;
+    let remainingAllowed = Math.min(totalModelCount, maxAllowedForSet);
+    let actualSelectedCount = 0;
+
+    // Add selected weapons
+    set.choices.forEach(choice => {
+      const count = wargearCounts[choice.id] || 0;
+      // We don't add weapons if this choice is the default option itself
+      const isDefaultChoice = choice.items.every(item => model.weapons.some(w => w.name === item.name));
+      if (isDefaultChoice) return;
+
+      const allowedCount = Math.min(count, remainingAllowed);
+      if (allowedCount > 0) {
+        actualSelectedCount += allowedCount;
+        remainingAllowed -= allowedCount;
+        choice.items.forEach(item => {
+          const existing = activeWeapons.find(w => w.name === item.name);
+          if (existing) {
+            existing.count += item.count * allowedCount;
+          } else {
+            activeWeapons.push({
+              name: item.name,
+              wargearType: item.wargearType,
+              count: item.count * allowedCount,
+              profiles: item.profiles
+            });
+          }
+        });
+      }
+    });
+
+    // Reduce the count of the default weapons replaced by this choice set
+    const replacedDefaultWeapons = set.alternate
+      ? model.weapons
+      : model.weapons.filter(w =>
+          set.choices.some(choice => choice.items.some(item => item.name === w.name))
+        );
+
+    replacedDefaultWeapons.forEach(w => {
+      const currentRemaining = defaultWeaponRemaining.get(w.name) || 0;
+      const reduction = w.count * actualSelectedCount;
+      defaultWeaponRemaining.set(w.name, Math.max(0, currentRemaining - reduction));
+    });
+  });
+
+  // Now add the default weapons that are still remaining
+  model.weapons.forEach(w => {
+    const remaining = defaultWeaponRemaining.get(w.name) || 0;
+    if (remaining > 0) {
+      const existing = activeWeapons.find(aw => aw.name === w.name);
+      if (existing) {
+        existing.count += remaining;
+      } else {
+        activeWeapons.push({
+          ...w,
+          count: remaining
+        });
+      }
+    }
+  });
+
+  // Process addition sets (e.g. Ammo Runts, Grot Orderlies, Seeker Missiles)
+  additionSets.forEach(set => {
+    set.choices.forEach(choice => {
+      const count = wargearCounts[choice.id] || 0;
+      if (count > 0) {
+        choice.items.forEach(item => {
+          const existing = activeWeapons.find(w => w.name === item.name);
+          if (existing) {
+            existing.count += item.count * count;
+          } else {
+            activeWeapons.push({
+              name: item.name,
+              wargearType: item.wargearType,
+              count: item.count * count,
+              profiles: item.profiles
+            });
+          }
+        });
+      }
+    });
+  });
+
+  return activeWeapons;
 }
 
 interface ArmyBuilderProps {
@@ -657,6 +821,20 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }));
   };
 
+  // Change selected wargear count (for steppers / checkboxes)
+  const handleWargearCountChange = (unitId: string, choiceId: string, count: number) => {
+    setRoster(prev => prev.map(u => {
+      if (u.id !== unitId) return u;
+      const currentCounts = u.wargearCounts ? { ...u.wargearCounts } : {};
+      if (count <= 0) {
+        delete currentCounts[choiceId];
+      } else {
+        currentCounts[choiceId] = count;
+      }
+      return { ...u, wargearCounts: currentCounts };
+    }));
+  };
+
   // Toggle warlord
   const handleToggleWarlord = (id: string) => {
     setRoster(prev => prev.map(u => {
@@ -843,6 +1021,47 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           }
         }
       }
+    });
+
+    // 6. Squad-level limited wargear checks
+    roster.forEach(u => {
+      const matched = factionData.units.find(mu => mu.slug === u.unitSlug);
+      const ds = matched?.appDatasheet;
+      if (!ds || !ds.limitedWargearChoiceSets || ds.limitedWargearChoiceSets.length === 0) return;
+
+      ds.limitedWargearChoiceSets.forEach(set => {
+        // Find applicable limit for the current squad size
+        const limits = set.limits || [];
+        const applicableLimit = [...limits]
+          .sort((a, b) => b.modelCount - a.modelCount)
+          .find(lim => lim.modelCount <= u.modelsCount);
+
+        if (!applicableLimit) return;
+
+        // Gather all limited item IDs in this set
+        const limitedItemIds = new Set(set.choices.flatMap(c => c.wargearItemIds || []));
+
+        // Count how many regular selected choices contain these limited items
+        let selectedCount = 0;
+        const seenChoiceIds = new Set<string>();
+        ds.models.forEach(model => {
+          model.wargearChoiceSets?.forEach(regSet => {
+            regSet.choices.forEach(regChoice => {
+              if (seenChoiceIds.has(regChoice.id)) return;
+              seenChoiceIds.add(regChoice.id);
+
+              const hasLimitedItem = regChoice.items.some(item => limitedItemIds.has(item.wargearItemId));
+              if (hasLimitedItem) {
+                selectedCount += u.wargearCounts?.[regChoice.id] || 0;
+              }
+            });
+          });
+        });
+
+        if (selectedCount > applicableLimit.choiceLimit) {
+          validationErrors.push(`Exceeded wargear limit for "${u.name}": selected ${selectedCount} limited upgrades (Max is ${applicableLimit.choiceLimit} for squad size ${u.modelsCount}).`);
+        }
+      });
     });
   }
 
@@ -1552,9 +1771,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         // Get all weapon profiles across models
                         const weaponRows: React.ReactNode[] = [];
                         const seenProfiles = new Set<string>();
+                        const modelCounts = getRosterUnitModelCounts(unit, ds);
 
                         ds.models.forEach(model => {
-                          model.weapons?.forEach(weapon => {
+                          const totalModelCount = modelCounts[model.name] || 0;
+                          if (totalModelCount === 0) return;
+                          const activeWeapons = getUnitActiveWeapons(unit, model, totalModelCount);
+                          activeWeapons.forEach(weapon => {
                             weapon.profiles?.forEach(prof => {
                               const key = `${weapon.name}-${prof.name}-${prof.range}`;
                               if (seenProfiles.has(key)) return;
@@ -1608,14 +1831,20 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
                   // Extract and format weapon profiles compactly
                   const formattedWeapons: string[] = [];
-                  ds?.models.forEach(m => {
-                    m.weapons?.forEach(w => {
-                      const formatted = formatCompactWeapon(w);
-                      if (!formattedWeapons.includes(formatted)) {
-                        formattedWeapons.push(formatted);
-                      }
+                  if (ds) {
+                    const modelCounts = getRosterUnitModelCounts(unit, ds);
+                    ds.models.forEach(m => {
+                      const totalModelCount = modelCounts[m.name] || 0;
+                      if (totalModelCount === 0) return;
+                      const activeWeapons = getUnitActiveWeapons(unit, m, totalModelCount);
+                      activeWeapons.forEach(w => {
+                        const formatted = formatCompactWeapon(w);
+                        if (!formattedWeapons.includes(formatted)) {
+                          formattedWeapons.push(formatted);
+                        }
+                      });
                     });
-                  });
+                  }
 
                   // Abilities list
                   const abilities = ds?.abilities.map(a => a.name).join(', ') || '';
@@ -1907,6 +2136,221 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           )}
 
         </div>
+
+        {/* Wargear Choices Section */}
+        {(() => {
+          if (!matchedCatalog?.appDatasheet) return null;
+          const modelCounts = getRosterUnitModelCounts(unit, matchedCatalog.appDatasheet);
+          const hasDisplayableWargear = matchedCatalog.appDatasheet.models.some(model => {
+            const totalModelCount = modelCounts[model.name] || 0;
+            if (totalModelCount === 0) return false;
+            return (model.wargearChoiceSets || []).some(set => {
+              if (set.choices.length === 0) return false;
+              if (set.choices.length === 1) {
+                const choice = set.choices[0];
+                const isDefault = choice.items.every(item => model.weapons?.some(w => w.name === item.name));
+                if (isDefault) return false;
+              }
+              return true;
+            });
+          });
+          if (!hasDisplayableWargear) return null;
+
+          return (
+            <div style={{ width: '100%', marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.04)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '0.25rem', marginBottom: '0.25rem' }}>
+                Wargear Selections
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {matchedCatalog.appDatasheet.models.map(model => {
+                  const totalModelCount = modelCounts[model.name] || 0;
+                  if (totalModelCount === 0) return null;
+
+                  const modelSets = (model.wargearChoiceSets || []).filter(set => {
+                    if (set.choices.length === 0) return false;
+                    if (set.choices.length === 1) {
+                      const choice = set.choices[0];
+                      const isDefault = choice.items.every(item => model.weapons?.some(w => w.name === item.name));
+                      if (isDefault) return false;
+                    }
+                    return true;
+                  });
+
+                  if (modelSets.length === 0) return null;
+
+                  return (
+                    <div key={model.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', textAlign: 'left' }}>
+                      {matchedCatalog.appDatasheet!.models.length > 1 && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--accent-teal)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                          {model.name} Options ({totalModelCount} models)
+                        </div>
+                      )}
+                      {modelSets.map((set, setIdx) => {
+                        const isSingleChoiceOptional = set.choices.length === 1;
+                        const isSingleChoiceSelect = set.choices.length > 1 && set.limit === 1 && totalModelCount === 1;
+
+                        if (isSingleChoiceOptional) {
+                          const choice = set.choices[0];
+                          const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                          const isChecked = (unit.wargearCounts?.[choice.id] || 0) > 0;
+                          return (
+                            <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                              <label
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.4rem',
+                                  fontSize: '0.8rem',
+                                  color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                  cursor: 'pointer',
+                                  userSelect: 'none'
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={(e) => {
+                                    handleWargearCountChange(unit.id, choice.id, e.target.checked ? 1 : 0);
+                                  }}
+                                  style={{ cursor: 'pointer' }}
+                                />
+                                {label}
+                              </label>
+                            </div>
+                          );
+                        } else if (isSingleChoiceSelect) {
+                          const selectedChoiceId = set.choices.find(c => (unit.wargearCounts?.[c.id] || 0) > 0)?.id || '';
+                          return (
+                            <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                Choose 1 option (Limit {set.limit})
+                              </span>
+                              <select
+                                value={selectedChoiceId}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setRoster(prev => prev.map(u => {
+                                    if (u.id !== unit.id) return u;
+                                    const currentCounts = u.wargearCounts ? { ...u.wargearCounts } : {};
+                                    set.choices.forEach(c => {
+                                      delete currentCounts[c.id];
+                                    });
+                                    if (val) {
+                                      currentCounts[val] = 1;
+                                    }
+                                    return { ...u, wargearCounts: currentCounts };
+                                  }));
+                                }}
+                                style={{
+                                  background: 'var(--bg-tertiary)',
+                                  color: 'var(--text-primary)',
+                                  border: '1px solid var(--glass-border)',
+                                  borderRadius: '6px',
+                                  padding: '0.3rem 0.6rem',
+                                  fontSize: '0.8rem',
+                                  cursor: 'pointer',
+                                  width: '100%',
+                                  maxWidth: '400px'
+                                }}
+                              >
+                                <option value="">-- Default Loadout --</option>
+                                {set.choices.map((choice, cidx) => {
+                                  const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                                  return (
+                                    <option key={choice.id || cidx} value={choice.id}>
+                                      {label}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+                          );
+                        } else {
+                          const maxAllowed = set.limit * (set.miniatureId ? totalModelCount : 1);
+                          const setAllocatedCount = set.choices.reduce((sum, choice) => sum + (unit.wargearCounts?.[choice.id] || 0), 0);
+                          const remainder = Math.max(0, maxAllowed - setAllocatedCount);
+
+                          return (
+                            <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', background: 'rgba(0,0,0,0.1)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255,255,255,0.02)', paddingBottom: '0.2rem' }}>
+                                <span>Options (Limit: {maxAllowed})</span>
+                                {totalModelCount > 1 && (
+                                  <span style={{ color: remainder > 0 ? 'var(--accent-teal)' : 'var(--text-secondary)' }}>
+                                    Default ({model.weapons.map(w => `${w.name}${w.count > 1 ? ` x${w.count}` : ''}`).join(', ')}) remaining: {remainder}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                {set.choices.map((choice, cidx) => {
+                                  const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                                  const currentCount = unit.wargearCounts?.[choice.id] || 0;
+                                  const isDefaultChoice = choice.items.every(item => model.weapons?.some(w => w.name === item.name));
+
+                                  if (isDefaultChoice) return null;
+
+                                  return (
+                                    <div key={choice.id || cidx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', fontSize: '0.75rem' }}>
+                                      <span style={{ color: currentCount > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</span>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleWargearCountChange(unit.id, choice.id, currentCount - 1)}
+                                          disabled={currentCount <= 0}
+                                          style={{
+                                            width: '20px',
+                                            height: '20px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            background: 'rgba(255,255,255,0.05)',
+                                            border: '1px solid var(--glass-border)',
+                                            color: 'var(--text-primary)',
+                                            borderRadius: '4px',
+                                            cursor: currentCount <= 0 ? 'not-allowed' : 'pointer',
+                                            opacity: currentCount <= 0 ? 0.3 : 1
+                                          }}
+                                        >
+                                          -
+                                        </button>
+                                        <span style={{ minWidth: '15px', textAlign: 'center', fontWeight: currentCount > 0 ? 'bold' : 'normal' }}>
+                                          {currentCount}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleWargearCountChange(unit.id, choice.id, currentCount + 1)}
+                                          disabled={remainder <= 0}
+                                          style={{
+                                            width: '20px',
+                                            height: '20px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            background: 'rgba(255,255,255,0.05)',
+                                            border: '1px solid var(--glass-border)',
+                                            color: 'var(--text-primary)',
+                                            borderRadius: '4px',
+                                            cursor: remainder <= 0 ? 'not-allowed' : 'pointer',
+                                            opacity: remainder <= 0 ? 0.3 : 1
+                                          }}
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        }
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
       </div>
     );

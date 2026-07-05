@@ -33,7 +33,7 @@ Sv in both statline blocks. Split melee/ranged invulns collapse to one value —
 attacker's statline mid-simulation as it takes wounds. Real work; don't bundle with
 the display fix.
 
-## 3. `loadout_choice*` + `wargear_limit*` — wargear swap options
+## 3. `loadout_choice*` + `wargear_limit*` — wargear swap options ✅ display & mathhammer done
 
 **Effort: medium. Payoff: high (biggest missing feature).**
 
