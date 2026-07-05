@@ -11,46 +11,15 @@ import {
   Save,
   FolderOpen,
   Crown,
-  Upload
+  Upload,
+  Share2
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
-import { getBattleSizes } from '../utils/db';
+import { getBattleSizes, getFactionList } from '../utils/db';
 import type { BattleSize } from '../utils/db';
 import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet } from '../types/data';
 
-const FACTION_NAMES: Record<string, string> = {
-  'adepta-sororitas': 'Adepta Sororitas',
-  'adeptus-custodes': 'Adeptus Custodes',
-  'adeptus-mechanicus': 'Adeptus Mechanicus',
-  'aeldari': 'Aeldari',
-  'astra-militarum': 'Astra Militarum',
-  'black-templars': 'Black Templars',
-  'blood-angels': 'Blood Angels',
-  'dark-angels': 'Dark Angels',
-  'space-wolves': 'Space Wolves',
-  'deathwatch': 'Deathwatch',
-  'space-marines': 'Space Marines',
-  'chaos-daemons': 'Chaos Daemons',
-  'chaos-knights': 'Chaos Knights',
-  'chaos-space-marines': 'Chaos Space Marines',
-  'chaos-titan-legions': 'Chaos Titan Legions',
-  'death-guard': 'Death Guard',
-  'drukhari': 'Drukhari',
-  'emperors-children': "Emperor's Children",
-  'genestealer-cults': 'Genestealer Cults',
-  'grey-knights': 'Grey Knights',
-  'imperial-agents': 'Imperial Agents',
-  'imperial-knights': 'Imperial Knights',
-  'leagues-of-votann': 'Leagues of Votann',
-  'necrons': 'Necrons',
-  'orks': 'Orks',
-  'tau-empire': "T'au Empire",
-  'thousand-sons': 'Thousand Sons',
-  'titan-legions': 'Titan Legions',
-  'tyranids': 'Tyranids',
-  'world-eaters': 'World Eaters'
-};
 
 interface ParsedRosterUnit {
   name: string;
@@ -95,52 +64,170 @@ function findBestCostIndex(costs: { points: number; models: number }[], parsedPo
   return bestIdx;
 }
 
-function findFactionSlugByName(rosterHeaderLine: string): { slug: string; name: string } | null {
-  const normalizedHeader = rosterHeaderLine.toLowerCase();
+function findFactionSlugByName(textLine: string, dbFactions: { faction: string; slug: string }[]): { slug: string; name: string } | null {
+  const normalized = textLine.toLowerCase().trim();
 
-  for (const [slug, name] of Object.entries(FACTION_NAMES)) {
-    const normName = name.toLowerCase();
-    const baseWord = normName.replace(/s$/, '');
-    if (normalizedHeader.includes(normName) || (baseWord.length > 3 && normalizedHeader.includes(baseWord))) {
-      return { slug, name };
+  // 1. Check custom short aliases for completely different spellings/words
+  const customAliases: Record<string, string> = {
+    'admech': 'adeptus-mechanicus',
+    'eldar': 'aeldari',
+    'guard': 'astra-militarum',
+    'gsc': 'genestealer-cults',
+    'squat': 'leagues-of-votann',
+    'astartes': 'space-marines',
+    'sister': 'adepta-sororitas',
+    'heretic': 'chaos-space-marines'
+  };
+
+  for (const [alias, slug] of Object.entries(customAliases)) {
+    if (new RegExp(`\\b${alias}\\b`, 'i').test(normalized)) {
+      const match = dbFactions.find(f => f.slug === slug);
+      if (match) return { slug: match.slug, name: match.faction };
     }
   }
 
-  if (normalizedHeader.includes('ork')) return { slug: 'orks', name: 'Orks' };
-  if (normalizedHeader.includes('necron')) return { slug: 'necrons', name: 'Necrons' };
-  if (normalizedHeader.includes('tyranid')) return { slug: 'tyranids', name: 'Tyranids' };
-  if (normalizedHeader.includes('sororitas') || normalizedHeader.includes('sister')) return { slug: 'adepta-sororitas', name: 'Adepta Sororitas' };
-  if (normalizedHeader.includes('custodes')) return { slug: 'adeptus-custodes', name: 'Adeptus Custodes' };
-  if (normalizedHeader.includes('mechanicus') || normalizedHeader.includes('admech')) return { slug: 'adeptus-mechanicus', name: 'Adeptus Mechanicus' };
-  if (normalizedHeader.includes('aeldari') || normalizedHeader.includes('eldar')) return { slug: 'aeldari', name: 'Aeldari' };
-  if (normalizedHeader.includes('militarum') || normalizedHeader.includes('guard')) return { slug: 'astra-militarum', name: 'Astra Militarum' };
-  if (normalizedHeader.includes('templar')) return { slug: 'black-templars', name: 'Black Templars' };
-  if (normalizedHeader.includes('blood angel')) return { slug: 'blood-angels', name: 'Blood Angels' };
-  if (normalizedHeader.includes('dark angel')) return { slug: 'dark-angels', name: 'Dark Angels' };
-  if (normalizedHeader.includes('wolf') || normalizedHeader.includes('wolves')) return { slug: 'space-wolves', name: 'Space Wolves' };
-  if (normalizedHeader.includes('deathwatch')) return { slug: 'deathwatch', name: 'Deathwatch' };
-  if (normalizedHeader.includes('daemon')) return { slug: 'chaos-daemons', name: 'Chaos Daemons' };
-  if (normalizedHeader.includes('chaos knight')) return { slug: 'chaos-knights', name: 'Chaos Knights' };
-  if (normalizedHeader.includes('heretic') || normalizedHeader.includes('chaos space marine')) return { slug: 'chaos-space-marines', name: 'Chaos Space Marines' };
-  if (normalizedHeader.includes('death guard')) return { slug: 'death-guard', name: 'Death Guard' };
-  if (normalizedHeader.includes('drukhari') || normalizedHeader.includes('dark eldar')) return { slug: 'drukhari', name: 'Drukhari' };
-  if (normalizedHeader.includes('children')) return { slug: 'emperors-children', name: "Emperor's Children" };
-  if (normalizedHeader.includes('genestealer') || normalizedHeader.includes('gsc')) return { slug: 'genestealer-cults', name: 'Genestealer Cults' };
-  if (normalizedHeader.includes('grey knight')) return { slug: 'grey-knights', name: 'Grey Knights' };
-  if (normalizedHeader.includes('agent')) return { slug: 'imperial-agents', name: 'Imperial Agents' };
-  if (normalizedHeader.includes('knight')) return { slug: 'imperial-knights', name: 'Imperial Knights' };
-  if (normalizedHeader.includes('votann') || normalizedHeader.includes('squat')) return { slug: 'leagues-of-votann', name: 'Leagues of Votann' };
-  if (normalizedHeader.includes('tau') || normalizedHeader.includes('t\'au')) return { slug: 'tau-empire', name: "T'au Empire" };
-  if (normalizedHeader.includes('thousand sons')) return { slug: 'thousand-sons', name: 'Thousand Sons' };
-  if (normalizedHeader.includes('world eater')) return { slug: 'world-eaters', name: 'World Eaters' };
-  if (normalizedHeader.includes('space marine') || normalizedHeader.includes('astartes')) return { slug: 'space-marines', name: 'Space Marines' };
+  // 2. Try matching normalized db faction names or singularized versions
+  for (const f of dbFactions) {
+    const normFaction = f.faction.toLowerCase();
+    const singularized = normFaction
+      .replace(/wolves$/, 'wolf')
+      .replace(/s$/, ''); // singularize (necrons -> necron, orks -> ork)
+
+    if (normalized.includes(normFaction) || (singularized.length > 3 && normalized.includes(singularized))) {
+      return { slug: f.slug, name: f.faction };
+    }
+  }
 
   return null;
 }
 
-function parseBattleForgeText(text: string): ParsedRoster {
+function parseWtc(text: string, dbFactions: { faction: string; slug: string }[]): ParsedRoster {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const parsed: ParsedRoster = {
+    rosterName: 'Imported WTC Roster',
+    factionSlug: null,
+    factionName: null,
+    detachmentName: null,
+    pointLimit: 2000,
+    units: []
+  };
 
+  const fullText = text.replace(/\r\n/g, '\n');
+  const headerMatch = fullText.match(/PLAYER:\s*(.*?)\nFACTION:\s*(.*?)\nDETACHMENT:\s*(.*?)\nTOTAL POINTS:\s*(\d[\d\s\u00A0,.]*)\s*pts/i);
+  if (headerMatch) {
+    parsed.rosterName = `${headerMatch[1].trim()}'s Roster`;
+    parsed.detachmentName = headerMatch[3].trim();
+    parsed.pointLimit = parseInt(headerMatch[4].replace(/[\s\u00A0,.]/g, ''), 10);
+    
+    const factionMatch = findFactionSlugByName(headerMatch[2], dbFactions);
+    if (factionMatch) {
+      parsed.factionSlug = factionMatch.slug;
+      parsed.factionName = factionMatch.name;
+    }
+  }
+
+  for (const line of lines) {
+    const unitMatch = line.match(/^UNIT\s*\d+:\s*(.*?)\s*-\s*(\d[\d\s\u00A0,.]*)\s*pts/i);
+    if (unitMatch) {
+      const rawName = unitMatch[1].trim();
+      const points = parseInt(unitMatch[2].replace(/[\s\u00A0,.]/g, ''), 10);
+      
+      const isWarlord = /\bWARLORD\b/i.test(rawName);
+      let cleanName = rawName.replace(/\bWARLORD\b/i, '').replace(/^-?\s*/, '').trim();
+      
+      let enhancementName: string | undefined;
+      const enhMatch = cleanName.match(/-\s*Enhancement:\s*(.*)/i);
+      if (enhMatch) {
+        enhancementName = enhMatch[1].replace(/\(Upgrade\)$/i, '').trim();
+        cleanName = cleanName.replace(/-\s*Enhancement:\s*.*/i, '').trim();
+      }
+
+      // Strip wargear parentheses
+      cleanName = cleanName.replace(/\([^)]+\)/g, '').trim();
+      cleanName = cleanName.replace(/[^a-zA-Z0-9\s'’\-:.,()!&]/g, '').trim();
+
+      parsed.units.push({
+        name: cleanName,
+        points,
+        isWarlord,
+        enhancementName,
+        rawModelCounts: []
+      });
+    }
+  }
+
+  return parsed;
+}
+
+function parseStandardCasual(text: string, dbFactions: { faction: string; slug: string }[]): ParsedRoster {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const parsed: ParsedRoster = {
+    rosterName: 'Imported Casual Roster',
+    factionSlug: null,
+    factionName: null,
+    detachmentName: null,
+    pointLimit: 2000,
+    units: []
+  };
+
+  const fullText = text.replace(/\r\n/g, '\n');
+  const headerMatch = fullText.match(/\*\*DETACHMENT:\*\*\s*(.*?)\n\*\*TOTAL ARMY POINTS:\*\*\s*(\d[\d\s\u00A0,.]*)pts/i);
+  if (headerMatch) {
+    parsed.detachmentName = headerMatch[1].trim();
+    parsed.pointLimit = parseInt(headerMatch[2].replace(/[\s\u00A0,.]/g, ''), 10);
+  }
+
+  for (let i = 0; i < Math.min(12, lines.length); i++) {
+    const factionMatch = findFactionSlugByName(lines[i], dbFactions);
+    if (factionMatch) {
+      parsed.factionSlug = factionMatch.slug;
+      parsed.factionName = factionMatch.name;
+      break;
+    }
+  }
+
+  let currentUnit: ParsedRosterUnit | null = null;
+  for (const line of lines) {
+    if (/\*\*(CHARACTER|BATTLELINE|OTHER DATASHEETS)\*\*/i.test(line)) {
+      continue;
+    }
+
+    const unitMatch = line.match(/^\*\s*\*\*(.*?)\*\*(?:\s*\(\s*(\d[\d\s\u00A0,.]*)\s*points?\s*\))?:\s*(.*)/i);
+    if (unitMatch) {
+      if (currentUnit) {
+        parsed.units.push(currentUnit);
+      }
+      const rawName = unitMatch[1].trim();
+      const points = unitMatch[2] ? parseInt(unitMatch[2].replace(/[\s\u00A0,.]/g, ''), 10) : 0;
+      const rawWargear = unitMatch[3].trim();
+
+      const isWarlord = /\bWarlord\b/i.test(rawName) || /\bWarlord\b/i.test(rawWargear);
+      const cleanName = rawName.replace(/\bWarlord\b/i, '').replace(/^-?\s*/, '').trim();
+
+      currentUnit = {
+        name: cleanName.replace(/[^a-zA-Z0-9\s'’\-:.,()!&]/g, '').trim(),
+        points,
+        isWarlord,
+        rawModelCounts: []
+      };
+      continue;
+    }
+
+    const enhMatch = line.match(/^-\s*Enhancement:\s*(.*)/i);
+    if (enhMatch && currentUnit) {
+      currentUnit.enhancementName = enhMatch[1].replace(/\(Upgrade\)$/i, '').trim();
+    }
+  }
+
+  if (currentUnit) {
+    parsed.units.push(currentUnit);
+  }
+
+  return parsed;
+}
+
+function parseOfficialAppExport(text: string, dbFactions: { faction: string; slug: string }[]): ParsedRoster {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const parsed: ParsedRoster = {
     rosterName: 'Imported Roster',
     factionSlug: null,
@@ -152,38 +239,63 @@ function parseBattleForgeText(text: string): ParsedRoster {
 
   if (lines.length === 0) return parsed;
 
-  let headerIndex: number;
-  const signatureIndex = lines.findIndex(l => l.toUpperCase().includes('EXPORTED FROM THE WARHAMMER'));
+  for (let i = 0; i < Math.min(12, lines.length); i++) {
+    const factionMatch = findFactionSlugByName(lines[i], dbFactions);
+    if (factionMatch) {
+      parsed.factionSlug = factionMatch.slug;
+      parsed.factionName = factionMatch.name;
+      break;
+    }
+  }
 
-  if (signatureIndex !== -1) {
+  for (let i = 0; i < Math.min(12, lines.length); i++) {
+    const line = lines[i];
+    if (/\(\s*\d+\s*Detachment\s*Points\s*\)/i.test(line)) {
+      const match = line.match(/^(.+?)\s*\(\s*\d+\s*Detachment\s*Points\s*\)/i);
+      if (match) {
+        parsed.detachmentName = match[1].trim();
+        break;
+      }
+    }
+  }
+
+  let headerIndex = -1;
+  const signatureIndex = lines.findIndex(l => l.toUpperCase().includes('EXPORTED FROM THE WARHAMMER'));
+  const pointsRegex = /\(\s*(\d[\d\s\u00A0,.]*)\s*points?\s*\)/i;
+
+  if (signatureIndex !== -1 && signatureIndex + 1 < lines.length) {
     headerIndex = signatureIndex + 1;
   } else {
-    headerIndex = lines.findIndex(l => /\(\d+\s*points?\)/i.test(l));
+    if (lines.length > 0 && pointsRegex.test(lines[0])) {
+      headerIndex = 0;
+    } else {
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (pointsRegex.test(line)) {
+          const cleanLine = line.replace(/\s+/g, ' ');
+          const match = cleanLine.match(/^(.+?)\s*\(\s*(\d[\d\s\u00A0,.]*)\s*points?\s*\)/i);
+          if (match) {
+            const name = match[1].trim().toUpperCase();
+            const isMetadata = /^(STRIKE FORCE|COMBAT PATROL|INCURSION|ONSLAUGHT|GRAND TOURNAMENT|WARHORDE|WAR HODE)$/i.test(name);
+            if (!isMetadata) {
+              headerIndex = i;
+              break;
+            }
+          }
+        }
+      }
+    }
   }
 
   if (headerIndex !== -1 && headerIndex < lines.length) {
     const headerLine = lines[headerIndex];
-    const match = headerLine.match(/^(.+?)\s*\(\s*(\d+)\s*points?\s*\)/i);
+    const cleanHeaderLine = headerLine.replace(/\s+/g, ' ');
+    const match = cleanHeaderLine.match(/^(.+?)\s*\(\s*(\d[\d\s\u00A0,.]*)\s*points?\s*\)/i);
     if (match) {
       parsed.rosterName = match[1].trim();
-      parsed.pointLimit = parseInt(match[2], 10);
+      parsed.pointLimit = parseInt(match[2].replace(/[\s\u00A0,.]/g, ''), 10);
     } else {
       parsed.rosterName = headerLine;
-    }
-
-    const factionMatch = findFactionSlugByName(headerLine);
-    if (factionMatch) {
-      parsed.factionSlug = factionMatch.slug;
-      parsed.factionName = factionMatch.name;
-    }
-
-    const possibleDetachmentIndex = headerIndex + 1;
-    if (possibleDetachmentIndex < lines.length) {
-      const nextLine = lines[possibleDetachmentIndex];
-      const isCategory = /^(CHARACTERS|BATTLELINE|DEDICATED TRANSPORTS|OTHER DATASHEETS|ALLIED UNITS|FORTIFICATIONS)$/i.test(nextLine);
-      if (!isCategory && !nextLine.toUpperCase().includes('EXPORTED FROM THE WARHAMMER')) {
-        parsed.detachmentName = nextLine.trim();
-      }
     }
   }
 
@@ -192,17 +304,35 @@ function parseBattleForgeText(text: string): ParsedRoster {
 
   for (let i = startIndex; i < lines.length; i++) {
     const line = lines[i];
-    const upperLine = line.toUpperCase();
+    const upperLine = line.toUpperCase().trim();
 
-    if (line === parsed.detachmentName) {
+    if (parsed.detachmentName && line.includes(parsed.detachmentName)) {
       continue;
     }
 
-    if (upperLine.includes('EXPORTED FROM THE WARHAMMER')) {
+    if (upperLine.includes('EXPORTED FROM THE WARHAMMER') || upperLine.includes('EXPORTED WITH APP VERSION')) {
       continue;
     }
 
-    if (/^(CHARACTERS|BATTLELINE|DEDICATED TRANSPORTS|OTHER DATASHEETS|ALLIED UNITS|FORTIFICATIONS)$/i.test(line)) {
+    if (/^(CHARACTERS|BATTLELINE|DEDICATED TRANSPORTS|OTHER DATASHEETS|ALLIED UNITS|FORTIFICATIONS|ATTACHED UNITS)$/i.test(upperLine)) {
+      continue;
+    }
+    if (/^ATTACHED UNIT \d+$/i.test(upperLine)) {
+      continue;
+    }
+
+    if (pointsRegex.test(line)) {
+      const cleanLine = line.replace(/\s+/g, ' ');
+      const match = cleanLine.match(/^(.+?)\s*\(\s*(\d[\d\s\u00A0,.]*)\s*points?\s*\)/i);
+      if (match) {
+        const name = match[1].trim().toUpperCase();
+        if (/^(STRIKE FORCE|COMBAT PATROL|INCURSION|ONSLAUGHT|GRAND TOURNAMENT|WARHORDE|WAR HODE)$/i.test(name)) {
+          continue;
+        }
+      }
+    }
+
+    if (parsed.factionName && upperLine === parsed.factionName.toUpperCase()) {
       continue;
     }
 
@@ -215,8 +345,10 @@ function parseBattleForgeText(text: string): ParsedRoster {
 
       if (upperContent === 'WARLORD') {
         currentUnit.isWarlord = true;
-      } else if (upperContent.startsWith('ENHANCEMENT:')) {
-        const enhName = content.substring('Enhancement:'.length).trim();
+      } else if (upperContent.startsWith('ENHANCEMENT:') || upperContent.startsWith('ENHANCEMENTS:')) {
+        const prefixLength = upperContent.startsWith('ENHANCEMENT:') ? 'Enhancement:'.length : 'Enhancements:'.length;
+        let enhName = content.substring(prefixLength).trim();
+        enhName = enhName.replace(/\(Upgrade\)$/i, '').trim();
         currentUnit.enhancementName = enhName;
       } else {
         const countMatch = content.match(/^(\d+)\s*x\s*(.+)$/i);
@@ -227,14 +359,17 @@ function parseBattleForgeText(text: string): ParsedRoster {
         }
       }
     } else {
-      const unitMatch = line.match(/^(.+?)\s*\(\s*(\d+)\s*points?\s*\)/i);
+      const unitMatch = line.match(/^(.+?)\s*\(\s*(\d[\d\s\u00A0,.]*)\s*points?\s*\)/i);
       if (unitMatch) {
         if (currentUnit) {
           parsed.units.push(currentUnit);
         }
+        let name = unitMatch[1].trim();
+        name = name.replace(/[^a-zA-Z0-9\s'’\-:.,()!&]/g, '').trim();
+
         currentUnit = {
-          name: unitMatch[1].trim(),
-          points: parseInt(unitMatch[2], 10),
+          name,
+          points: parseInt(unitMatch[2].replace(/[\s\u00A0,.]/g, ''), 10),
           isWarlord: false,
           rawModelCounts: []
         };
@@ -247,6 +382,135 @@ function parseBattleForgeText(text: string): ParsedRoster {
   }
 
   return parsed;
+}
+
+function parseBattleForgeText(text: string, dbFactions: { faction: string; slug: string }[]): ParsedRoster {
+  if (/PLAYER:\s*.*?/i.test(text) && /FACTION:\s*.*?/i.test(text)) {
+    return parseWtc(text, dbFactions);
+  }
+  if (/\*\*DETACHMENT:\*\*/i.test(text) && /\*\*TOTAL ARMY POINTS:\*\*/i.test(text)) {
+    return parseStandardCasual(text, dbFactions);
+  }
+  return parseOfficialAppExport(text, dbFactions);
+}
+
+function getRosterUnitWargear(u: RosterUnit, factionData: MergedFaction | null): string[] {
+  const unitWargear: string[] = [];
+  const datasheet = factionData?.units.find(fu => fu.slug === u.unitSlug)?.appDatasheet;
+  if (datasheet) {
+    const modelCounts = getRosterUnitModelCounts(u, datasheet);
+    datasheet.models.forEach(model => {
+      const count = modelCounts[model.name] || 0;
+      if (count > 0) {
+        const activeWeapons = getUnitActiveWeapons(u, model, count);
+        activeWeapons.forEach(w => {
+          const label = w.count > count ? `${w.count}x ${w.name}` : w.name;
+          if (!unitWargear.includes(label)) {
+            unitWargear.push(label);
+          }
+        });
+      }
+    });
+  }
+  return unitWargear;
+}
+
+function generateRosterText(
+  roster: RosterUnit[],
+  factionData: MergedFaction | null,
+  detachmentSlugs: string[],
+  format: 'app' | 'standard' | 'wtc'
+): string {
+  const factionName = factionData?.factionName || 'Unknown Faction';
+  const detachmentNames = factionData
+    ? detachmentSlugs.map(slug => factionData.detachments.find(d => d.slug === slug)?.name || slug)
+    : detachmentSlugs;
+  const detachmentStr = detachmentNames.join(', ') || 'No Detachments';
+  const totalPoints = roster.reduce((sum, u) => sum + u.points + (u.enhancementPoints || 0), 0);
+
+  if (format === 'standard') {
+    const lines: string[] = [];
+    lines.push(`**DETACHMENT:** ${detachmentStr}`);
+    lines.push(`**TOTAL ARMY POINTS:** ${totalPoints}pts\n`);
+
+    const chars = roster.filter(u => u.isCharacter);
+    const battleline = roster.filter(u => u.isBattleline);
+    const other = roster.filter(u => !u.isCharacter && !u.isBattleline);
+
+    if (chars.length > 0) {
+      lines.push('**CHARACTER**');
+      chars.forEach(u => {
+        const warlordTag = u.isWarlord ? ', Warlord' : '';
+        const wargear = getRosterUnitWargear(u, factionData);
+        const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
+        lines.push(`* **${u.name}** (${u.points + (u.enhancementPoints || 0)} points)${warlordTag}${wargearSuffix}`);
+        if (u.enhancementName) {
+          lines.push(`  - Enhancement: ${u.enhancementName}`);
+        }
+      });
+      lines.push('');
+    }
+
+    if (battleline.length > 0) {
+      lines.push('**BATTLELINE**');
+      battleline.forEach(u => {
+        const wargear = getRosterUnitWargear(u, factionData);
+        const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
+        lines.push(`* **${u.name}** (${u.points} points)${wargearSuffix}`);
+      });
+      lines.push('');
+    }
+
+    if (other.length > 0) {
+      lines.push('**OTHER DATASHEETS**');
+      other.forEach(u => {
+        const wargear = getRosterUnitWargear(u, factionData);
+        const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
+        lines.push(`* **${u.name}** (${u.points} points)${wargearSuffix}`);
+      });
+      lines.push('');
+    }
+
+    return lines.join('\n').trim();
+  }
+
+  if (format === 'wtc') {
+    const lines: string[] = [];
+    lines.push(`PLAYER: Unknown Player`);
+    lines.push(`FACTION: ${factionName}`);
+    lines.push(`DETACHMENT: ${detachmentStr}`);
+    lines.push(`TOTAL POINTS: ${totalPoints}pts`);
+    lines.push('='.repeat(40) + '\n');
+
+    roster.forEach((u, idx) => {
+      const warlordSuffix = u.isWarlord ? ' - WARLORD' : '';
+      const wargear = getRosterUnitWargear(u, factionData);
+      const wargearSuffix = wargear.length > 0 ? ` (${wargear.join(', ')})` : '';
+      const enhSuffix = u.enhancementName ? ` - Enhancement: ${u.enhancementName}` : '';
+      lines.push(`UNIT ${idx + 1}: ${u.name}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${u.points + (u.enhancementPoints || 0)} pts]`);
+    });
+
+    return lines.join('\n');
+  }
+
+  // Default to official app format (Format B)
+  const lines: string[] = [];
+  lines.push(`${factionName} - ${detachmentStr} - [${totalPoints} pts]`);
+  lines.push('');
+
+  roster.forEach(u => {
+    const warlordSuffix = u.isWarlord ? ', Warlord' : '';
+    lines.push(`• ${u.name}${warlordSuffix} (${u.points + (u.enhancementPoints || 0)} pts)`);
+    if (u.enhancementName) {
+      lines.push(`  • Enhancement: ${u.enhancementName}`);
+    }
+    const wargear = getRosterUnitWargear(u, factionData);
+    wargear.forEach(gear => {
+      lines.push(`  • ${gear}`);
+    });
+  });
+
+  return lines.join('\n');
 }
 
 // Module-level so the impure calls stay out of render scope (react-hooks/purity).
@@ -457,6 +721,14 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     return [];
   });
 
+  const [dbFactions, setDbFactions] = useState<{ faction: string; slug: string }[]>([]);
+
+  useEffect(() => {
+    getFactionList()
+      .then(setDbFactions)
+      .catch(err => console.error('Failed to load factions list:', err));
+  }, []);
+
   // Per-game-size construction limits from the DB (detachment points, enhancements, duplicates)
   useEffect(() => {
     getBattleSizes()
@@ -471,6 +743,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // Import states
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [importText, setImportText] = useState<string>('');
+
+  // Export/Share states
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [shareFormat, setShareFormat] = useState<'app' | 'standard' | 'wtc'>('app');
+  const [isCopied, setIsCopied] = useState<boolean>(false);
 
   const handleSaveRoster = () => {
     if (!selectedFactionSlug || !factionData) return;
@@ -657,6 +934,38 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         }
       }
 
+      const selectedWargearChoices: Record<string, string[]> = {};
+      const wargearCounts: Record<string, number> = {};
+
+      if (matchedUnit.appDatasheet?.models && parsedUnit.rawModelCounts.length > 0) {
+        matchedUnit.appDatasheet.models.forEach(model => {
+          const sets = model.wargearChoiceSets || [];
+          sets.forEach(set => {
+            set.choices.forEach(choice => {
+              choice.items.forEach(item => {
+                const normItemName = normalizeName(item.name);
+                const matchedImport = parsedUnit.rawModelCounts.find(rc => {
+                  const normRcName = normalizeName(rc.name);
+                  return normRcName.includes(normItemName) || normItemName.includes(normRcName);
+                });
+
+                if (matchedImport) {
+                  const multiplier = Math.max(1, Math.round(matchedImport.count / item.count));
+                  wargearCounts[choice.id] = multiplier;
+                  
+                  if (!selectedWargearChoices[set.id]) {
+                    selectedWargearChoices[set.id] = [];
+                  }
+                  if (!selectedWargearChoices[set.id].includes(choice.id)) {
+                    selectedWargearChoices[set.id].push(choice.id);
+                  }
+                }
+              });
+            });
+          });
+        });
+      }
+
       newRosterUnits.push({
         id: makeRosterUnitId(matchedUnit.slug),
         unitSlug: matchedUnit.slug,
@@ -669,7 +978,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         isFactionPack: matchedUnit.isFactionPack || false,
         selectedCostIndex,
         enhancementName: validEnhancementName,
-        enhancementPoints: enhancementPoints > 0 ? enhancementPoints : undefined
+        enhancementPoints: enhancementPoints > 0 ? enhancementPoints : undefined,
+        selectedWargearChoices,
+        wargearCounts
       });
     }
 
@@ -711,7 +1022,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     if (!importText.trim()) return;
 
     try {
-      const parsed = parseBattleForgeText(importText);
+      const parsed = parseBattleForgeText(importText, dbFactions);
 
       if (parsed.units.length === 0) {
         alert("No units found to import. Please check that the raw text is from the Warhammer 40k Companion App export.");
@@ -719,9 +1030,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       }
 
       if (parsed.factionSlug && parsed.factionSlug !== selectedFactionSlug) {
-        const newFactionName = FACTION_NAMES[parsed.factionSlug] || parsed.factionName || parsed.factionSlug;
+        const newFactionName = dbFactions.find(f => f.slug === parsed.factionSlug)?.faction || parsed.factionName || parsed.factionSlug;
+        const currentFactionName = selectedFactionSlug ? (dbFactions.find(f => f.slug === selectedFactionSlug)?.faction || selectedFactionSlug) : 'None';
         const confirmSwitch = confirm(
-          `This list is for the "${newFactionName}" faction, but your current workspace is "${selectedFactionSlug ? FACTION_NAMES[selectedFactionSlug] : 'None'}".\n\n` +
+          `This list is for the "${newFactionName}" faction, but your current workspace is "${currentFactionName}".\n\n` +
           `Would you like to switch to "${newFactionName}" and import this roster?`
         );
 
@@ -1087,7 +1399,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               COGNIS FORCE RECONSTRUCTION ENGINE
             </div>
             <h2 style={{ fontSize: '2rem', textTransform: 'uppercase', margin: 0 }}>
-              {selectedFactionSlug ? FACTION_NAMES[selectedFactionSlug] : "ARMY LIST BUILDER"}
+              {selectedFactionSlug
+                ? (dbFactions.find(f => f.slug === selectedFactionSlug)?.faction || selectedFactionSlug.toUpperCase())
+                : "ARMY LIST BUILDER"}
             </h2>
           </div>
 
@@ -1116,8 +1430,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 }}
               >
                 <option value="">-- Choose Faction --</option>
-                {Object.entries(FACTION_NAMES).map(([slug, name]) => (
-                  <option key={slug} value={slug}>{name}</option>
+                {dbFactions.map(f => (
+                  <option key={f.slug} value={f.slug}>{f.faction}</option>
                 ))}
               </select>
             </div>
@@ -1619,6 +1933,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         <Printer size={14} /> Print Slate
                       </button>
                       <button
+                        className="button"
+                        onClick={() => setIsShareModalOpen(true)}
+                        style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                      >
+                        <Share2 size={14} /> Export List
+                      </button>
+                      <button
                         className="button-outline"
                         onClick={() => setRoster([])}
                         style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}
@@ -1677,6 +1998,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
       {isPrintPreviewOpen && renderPrintPreviewModal()}
       {isImportModalOpen && renderImportModal()}
+      {isShareModalOpen && renderShareModal()}
 
     </div>
   );
@@ -2523,6 +2845,132 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 style={{ fontSize: '0.85rem', padding: '0.5rem 1.25rem' }}
               >
                 Execute Import
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderShareModal() {
+    const textContent = generateRosterText(
+      roster,
+      factionData,
+      selectedDetachmentSlugs,
+      shareFormat
+    );
+
+    const handleCopy = () => {
+      navigator.clipboard.writeText(textContent);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    };
+
+    return (
+      <div className="overlay" style={{ display: 'flex', zIndex: 1000 }}>
+        <div className="print-preview-modal" style={{ maxWidth: '600px', height: 'auto', maxHeight: '95vh', margin: 'auto' }}>
+          <div className="modal-header" style={{ alignItems: 'center', background: 'var(--bg-secondary)', padding: '1rem 1.5rem', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between' }}>
+            <div>
+              <h3 style={{ textTransform: 'uppercase', color: 'var(--text-primary)', fontSize: '1.2rem', margin: 0 }}>Export Force Roster</h3>
+              <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                Export your current roster to multiple popular text formats.
+              </p>
+            </div>
+            <button
+              className="button-outline"
+              onClick={() => {
+                setIsShareModalOpen(false);
+                setIsCopied(false);
+              }}
+              style={{ fontSize: '0.85rem', padding: '0.3rem 0.6rem' }}
+            >
+              Close
+            </button>
+          </div>
+          <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', background: 'var(--bg-primary)' }}>
+            
+            {/* Format Selection Tab bar */}
+            <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.75rem' }}>
+              <button
+                onClick={() => setShareFormat('app')}
+                style={{
+                  background: shareFormat === 'app' ? 'var(--accent-gold)' : 'transparent',
+                  color: shareFormat === 'app' ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                  border: shareFormat === 'app' ? 'none' : '1px solid var(--glass-border)',
+                  borderRadius: '6px',
+                  padding: '0.4rem 0.8rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Official App Export
+              </button>
+              <button
+                onClick={() => setShareFormat('standard')}
+                style={{
+                  background: shareFormat === 'standard' ? 'var(--accent-gold)' : 'transparent',
+                  color: shareFormat === 'standard' ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                  border: shareFormat === 'standard' ? 'none' : '1px solid var(--glass-border)',
+                  borderRadius: '6px',
+                  padding: '0.4rem 0.8rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Standard Casual
+              </button>
+              <button
+                onClick={() => setShareFormat('wtc')}
+                style={{
+                  background: shareFormat === 'wtc' ? 'var(--accent-gold)' : 'transparent',
+                  color: shareFormat === 'wtc' ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                  border: shareFormat === 'wtc' ? 'none' : '1px solid var(--glass-border)',
+                  borderRadius: '6px',
+                  padding: '0.4rem 0.8rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Tournament WTC
+              </button>
+            </div>
+
+            <textarea
+              readOnly
+              value={textContent}
+              style={{
+                width: '100%',
+                height: '300px',
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--glass-border)',
+                borderRadius: '8px',
+                padding: '0.75rem',
+                fontSize: '0.85rem',
+                fontFamily: 'var(--font-mono)',
+                resize: 'none',
+                outline: 'none'
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', alignItems: 'center' }}>
+              {isCopied && (
+                <span style={{ fontSize: '0.85rem', color: 'var(--accent-teal)', fontWeight: 500 }}>
+                  Copied list to clipboard!
+                </span>
+              )}
+              <button
+                className="button"
+                onClick={handleCopy}
+                style={{ fontSize: '0.85rem', padding: '0.5rem 1.25rem' }}
+              >
+                Copy to Clipboard
               </button>
             </div>
           </div>
