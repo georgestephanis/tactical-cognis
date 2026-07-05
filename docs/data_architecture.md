@@ -74,10 +74,10 @@ Unifies the metadata used by Faction cards, detail overlays, and the Army Builde
 export interface MergedUnit {
   name: string;
   slug: string;
-  appDatasheet: Datasheet;
+  appDatasheet: Datasheet | null;
   pointsRange: { min: number; max: number };
   isCombatPatrol: boolean;
-  isFactionPack: boolean;
+  isFactionPack?: boolean;
 }
 ```
 
@@ -85,14 +85,20 @@ export interface MergedUnit {
 Represents a configured unit added to a force roster inside the Army Builder:
 ```typescript
 export interface RosterUnit {
-  id: string; // Unique instance ID generated at runtime
-  unit: MergedUnit; // Source unit metadata
-  selectedCostIndex: number; // Selected points sizing tier
-  selectedModels: number; // Configured model count
-  selectedPoints: number; // Configured points cost
-  isWarlord: boolean; // Flagged warlord
-  attachedEnhancement: AppEnhancement | null; // Attached enhancement card
-  attachedBodyguardId?: string; // Target bodyguard unit instance ID
-  attachedLeaderIds?: string[]; // Indented character instance IDs
+  id: string; // Unique instance ID
+  unitSlug: string;
+  name: string;
+  points: number;
+  modelsCount: number;
+  isCharacter: boolean;
+  isBattleline: boolean;
+  isFactionPack: boolean;
+  selectedCostIndex: number;
+  attachedToId?: string; // ID of target bodyguard squad
+  enhancementName?: string;
+  enhancementPoints?: number;
+  isWarlord?: boolean;
+  selectedWargearChoices?: Record<string, string[]>; // choiceSetId -> choiceId[]
+  wargearCounts?: Record<string, number>; // choiceId -> count selected
 }
 ```

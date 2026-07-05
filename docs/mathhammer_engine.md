@@ -13,11 +13,29 @@ Represents the statistics and special rules of the weapon profile, plus active b
 - `strength` (number), `ap` (number), `damage` (string)
 - **Special Weapon Rules:** `torrent`, `twinLinked`, `lethalHits`, `sustainedHits` (integer value), `devastatingWounds`, `blast`.
 - **Active Buffs:** `hitReRoll` and `woundReRoll` (`'none' | 'ones' | 'all'`), `plusToHit` and `plusToWound` modifier values, `antiKeyword` and `antiValue` (critical triggers, e.g. `'INFANTRY'` on `4+`).
+- **Advanced 11th Edition Attacker Settings (Optional):**
+  - `isMelee` (boolean): Flag indicating a melee weapon (influences melee invulnerable save checks).
+  - `ignoresCover` (boolean): Bypasses cover-based ballistic skill penalties.
+  - `ignoresHitPenalties` / `ignoresWoundPenalties` (boolean): Ignores negative roll modifiers.
+  - `critHitThreshold` / `critWoundThreshold` (number): Unmodified D6 threshold to trigger critical results (defaults to `6`).
+  - `indirectFire` (boolean): Shoots indirectly; caps hit roll to a maximum of 4+ (3/6 chance).
+  - `snapShots` (boolean): Hard caps hit roll to a flat 6+ (1/6 chance).
+  - `melta` (number): Flat bonus damage added to weapon damage profiles at close range.
+  - `flatMortals` (number): Flat mortal wounds generated per attack.
 
 ### 2. Defender Profile (`TargetProfile`)
 Represents the baseline and advanced defense profile of the target squad:
 - `t` (Toughness), `sv` (Armor Save, e.g., `3` for `3+`), `inv` (Invulnerable Save, e.g., `4++`), `w` (Wounds per model), `fnp` (Feel No Pain save), `keywords` (uppercase strings list), `unitSize` (total models).
-- **11th Edition Modifiers:** Cover modifiers, AP reduction (e.g. Armor of Contempt), hit/wound penalty caps, transhuman constraints (wound rolls of 1-3 fail), damage reduction/halving, and mortal wound FNP.
+- **Advanced 11th Edition Defender Modifiers (Optional):**
+  - `cover` (boolean): Active cover modifier (worsens shooter's BS by 1).
+  - `invMelee` / `invRanged` (number | null): Melee/ranged-specific invulnerable save overrides.
+  - `apReduction` (number): Reduces weapon AP penalty by this amount (e.g., Armor of Contempt).
+  - `hitPenalty` / `woundPenalty` (number): Applies a penalty to hit/wound rolls (max capped at -1).
+  - `noHitReRolls` / `noWoundReRolls` (boolean): Gating options to deny attacker re-rolls.
+  - `transhuman` (boolean): Constraint forcing unmodified wound rolls of 1-3 to fail automatically.
+  - `damageReduction` (number): Subtracted from incoming weapon damage (to a minimum of 1).
+  - `halveDamage` (boolean): Halves incoming weapon damage (rounded up).
+  - `mwFnp` (number | null): Feel No Pain save against mortal wounds/devastating wounds.
 
 ---
 
@@ -45,11 +63,18 @@ $$\text{Expected Attacks} = \text{Parsed Base Attacks} + \left( \lfloor \frac{\t
 ### 2. Hit Roll Sequence
 Calculates expected hits (`expectedHits`) and critical hits (`critHits`):
 - **Torrent:** Auto-hits, bypassing the hit roll. $\text{Expected Hits} = \text{Expected Attacks}$.
-- **Hit Roll:** Standard roll succeeds if $\text{Roll} \ge \text{Skill} - \text{plusToHit}$.
+- **Benefit of Cover (11th Edition):** If the target is in cover (and `ignoresCover` is false, and weapon is not melee), the shooter's Ballistic Skill (`bsWs`) is worsened by 1:
+  $$\text{Modified BS} = \text{bsWs} + 1$$
+- **Hit Roll Modifiers:** Standard roll succeeds if $\text{Roll} \ge \text{Modified BS} - \text{cappedHitMod}$.
+  - The net modifier (`plusToHit` - `hitPenalty`) is capped between $[-1, 1]$.
+  - The final required roll is constrained between $[2, 6]$ (unmodified 1 always fails).
+- **Snap Shots & Indirect Fire Caps:**
+  - *Snap Shots:* Hard caps hit chance to $1/6$.
+  - *Indirect Fire:* Caps hit chance to a maximum of $3/6$ (4+ target).
 - **Re-rolls:**
   - *Ones:* Re-rolls 1s (probability of $+1/6$).
   - *All:* Re-rolls all failed values.
-- **Sustained Hits:** Each critical hit (unmodified roll of `6`, or custom threshold) generates $X$ extra hits.
+- **Sustained Hits:** Each critical hit (unmodified roll of `critHitThreshold`, or `6` by default) generates $X$ extra hits.
 - **Lethal Hits:** Critical hits skip the wound roll and generate automatic wounds directly.
 
 ### 3. Wound Roll Sequence
@@ -65,8 +90,13 @@ Compares weapon Strength ($S$) vs target Toughness ($T$):
 
 ### 4. Saving Throws
 Calculates how many wounds pass through target armor and invulnerable saves:
-- **Modified Save Target:** $\text{Target Save} + \text{ap} + \text{cover modifier} - \text{apReduction}$.
-- **Active Save:** The engine selects the best save value between the modified armor save and the target's invulnerable save.
+- **Modified AP:** Calculated by subtracting `apReduction` from the weapon's `ap` value (AP is treated as a negative number, with a maximum penalty of 0):
+  $$\text{Modified AP} = \min(0, \text{ap} + \text{apReduction})$$
+- **Modified Save Target:** The defender's armor save modified by the AP:
+  $$\text{Modified Save Target} = \text{Target Save} - \text{Modified AP}$$
+- **Active Save:** The engine selects the best save value between the modified armor save and the target's invulnerable save. If `isMelee` is true, the `invMelee` override is preferred; if false, `invRanged` is preferred, falling back to `inv` in both cases if no override is set:
+  $$\text{Active Save} = \min(\text{Modified Save Target}, \text{Invulnerable Save})$$
+  *(The save roll chance is capped at a maximum success of 5/6, as unmodified 1s always fail).*
 - **Devastating Wounds:** Critical wounds skip this step entirely and proceed directly to damage calculations as unsaved wounds.
 
 ### 5. Damage Allocation & Feel No Pain (FNP)

@@ -23,9 +23,18 @@ npm run build                 # tsc -b && vite build → dist/ (may include loca
 npm run build:distributable   # IP-free static build → dist-distributable/ — this is the one to host/deploy
 npm run db:find                # Mac only: scan ~/Library/Containers for the companion app's db, copy to public/40k.sqlite
 npm run lint                   # eslint .
+npm test                       # Run zero-dependency mathhammer unit tests
 ```
 
-There is no wired-up test command. `src/utils/mathhammer.test.ts` exports `runMathhammerTests()`, a zero-dependency assert-based check of the damage math — it isn't run automatically by any script. Prefer this pattern (plain asserts, no framework) if you add coverage for other non-trivial logic in `src/utils/`.
+## Commands & Testing
+
+Unit tests are located in [tests/mathhammer.test.ts](file:///Users/georgestephanis/code/tactical-cognis/tests/mathhammer.test.ts). Execute them with:
+
+```bash
+npm test
+```
+
+Prefer this pattern (plain asserts, zero-dependency, run via `tsx`) if you add coverage for other logic.
 
 `npm run dev` / `npm run build` both run `copy-data.js` first (via `predev`/`prebuild`) to stage the `sql.js` WASM runtime into `public/`.
 

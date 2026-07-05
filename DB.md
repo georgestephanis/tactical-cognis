@@ -157,7 +157,7 @@ All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
 | Feature | Tables touched |
 |---|---|
 | Faction list (`getFactionList`) | `faction_keyword`, `datasheet_faction_keyword`, `detachment_faction_keyword` |
-| Units per faction (`getUnitsByFaction`) | `datasheet`, `publication`, `datasheet_faction_keyword`, `miniature`, `miniature_keyword`, `keyword`, `unit_composition(_miniature)`, `datasheet_points_step`, `datasheet_datasheet_ability`, `datasheet_ability`, `datasheet_bodyguard_group(_datasheet/_keyword)`, `wargear_item`, `wargear_item_profile`, `wargear_item_profile_wargear_ability`, `wargear_ability`, `base_miniature_loadout(_wargear_option)`, `wargear_option` |
+| Units per faction (`getUnitsByFaction`) | `datasheet`, `publication`, `datasheet_faction_keyword`, `miniature`, `miniature_keyword`, `keyword`, `unit_composition(_miniature)`, `datasheet_points_step`, `datasheet_datasheet_ability`, `datasheet_ability`, `datasheet_bodyguard_group(_datasheet/_keyword)`, `wargear_item`, `wargear_item_profile`, `wargear_item_profile_wargear_ability`, `wargear_ability`, `base_miniature_loadout(_wargear_option)`, `wargear_option`, `loadout_choice_set`, `loadout_choice`, `loadout_choice_wargear_item`, `limited_wargear_choice_set`, `limited_wargear_choice`, `limited_wargear_choice_wargear_item`, `wargear_limit` |
 | Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement`, `stratagem`, `detachment_unique_keyword` |
 | Army Builder game-size limits (`getBattleSizes`) | `battle_size` |
 | Dashboard stats (`getDbStats`) | `metadata` + row counts of the headline tables |
@@ -166,12 +166,9 @@ Meta-factions (umbrella keywords that span several sub-faction keywords) are exp
 in code via `META_FACTION_MAP` in `db.ts`, then widened by following datasheets that
 carry both a parent and child faction keyword.
 
-Notably **unused so far**: `loadout_choice*` (swap options), `wargear_limit*`, the
-missions family (other than `battle_size`), `allied_faction*`, and `faq`. All
+Notably **unused so far**: the missions family (other than `battle_size`), `allied_faction*`, and `faq`. All
 candidates for future features — see [`TODO.md`](./TODO.md) for the integration
-assessment of each. (`invulnerable_save` and `datasheet_damage` are now queried in
-`getUnitsByFaction` — invuln folds into each model's statline, damaged brackets into
-`Datasheet.damageProfiles`.)
+assessment of each. (`invulnerable_save`, `datasheet_damage`, `loadout_choice*` swap options, and `wargear_limit*` are now queried and integrated inside `getUnitsByFaction` and the Army Builder rosters/validations.)
 
 ## Useful query shapes
 

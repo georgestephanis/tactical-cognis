@@ -19,11 +19,11 @@ The **Unit Details Modal** is a full-screen overlay component that provides deep
 
 ### 2. Mathhammer Calculations
 When in Simulator mode, the selected weapon profile is run against five standardized enemy defensive presets (`TARGET_PRESETS` in [src/utils/mathhammer.ts](file:///Users/georgestephanis/code/tactical-cognis/src/utils/mathhammer.ts)):
-- **GEQ (Guard Equivalent):** T3, 5+ Save, 1 Wound (Infantry)
-- **MEQ (Space Marine Equivalent):** T4, 3+ Save, 2 Wounds (Infantry)
-- **TEQ (Terminator Equivalent):** T5, 2+/4++ Save, 3 Wounds (Infantry)
-- **VEH (Light Vehicle Equivalent):** T10, 3+/5++ Save, 12 Wounds (Vehicle)
-- **MON (Monster Equivalent):** T12, 2+/4++ Save, 18 Wounds (Monster)
+- **GEQ (Guard Equivalent):** T3, 5+ Save, 1 Wound, unit size 10 (Light Infantry Equivalent)
+- **MEQ (Space Marine Equivalent):** T4, 3+ Save, 2 Wounds, unit size 5 (Medium Infantry Equivalent)
+- **TEQ (Terminator Equivalent):** T5, 2+/4++ Save, 3 Wounds, unit size 5 (Heavy Infantry Equivalent)
+- **VEQ (Medium Vehicle Equivalent):** T10, 3+ Save (no invulnerable save), 12 Wounds, unit size 1
+- **HEAVY (Heavy Vehicle / Monster):** T12, 2+ Save (no invulnerable save), 16 Wounds, unit size 1
 
 The simulator runs calculations for:
 - **Expected Attacks:** Adjusts for Blast mechanics vs the target unit size.

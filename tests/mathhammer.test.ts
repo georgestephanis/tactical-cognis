@@ -3,11 +3,11 @@ import {
   getDiceDistribution, 
   expectedFlatDamageAfterFnp,
   getExpectedDamageForExpression
-} from './mathhammer.js';
+} from '../src/utils/mathhammer';
 import type {
   MathhammerInput,
   TargetProfile 
-} from './mathhammer.js';
+} from '../src/utils/mathhammer';
 
 // Simple lightweight assertion helper for zero-dependency test running
 function assert(condition: boolean, message: string) {
@@ -192,3 +192,6 @@ export function runMathhammerTests() {
 
   console.log("\nAll Mathhammer Unit Tests Completed Successfully! 🎉");
 }
+
+// Run tests automatically if this file is run directly via node/tsx
+runMathhammerTests();
