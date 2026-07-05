@@ -399,10 +399,12 @@ function getRosterUnitWargear(u: RosterUnit, factionData: MergedFaction | null):
   const datasheet = factionData?.units.find(fu => fu.slug === u.unitSlug)?.appDatasheet;
   if (datasheet) {
     const modelCounts = getRosterUnitModelCounts(u, datasheet);
+    let isFirstActive = true;
     datasheet.models.forEach(model => {
       const count = modelCounts[model.name] || 0;
       if (count > 0) {
-        const activeWeapons = getUnitActiveWeapons(u, model, count);
+        const activeWeapons = getUnitActiveWeapons(u, model, count, isFirstActive);
+        isFirstActive = false;
         activeWeapons.forEach(w => {
           const label = w.count > count ? `${w.count}x ${w.name}` : w.name;
           if (!unitWargear.includes(label)) {
@@ -567,7 +569,8 @@ function getRosterUnitModelCounts(unit: RosterUnit, datasheet: Datasheet): Recor
 function getUnitActiveWeapons(
   unit: RosterUnit,
   model: Model,
-  totalModelCount: number
+  totalModelCount: number,
+  isFirstActiveModel: boolean = true
 ): Weapon[] {
   if (!model.weapons) return [];
   const wargearCounts = unit.wargearCounts || {};
@@ -659,6 +662,10 @@ function getUnitActiveWeapons(
 
   // Process addition sets (e.g. Ammo Runts, Grot Orderlies, Seeker Missiles)
   additionSets.forEach(set => {
+    // If it's a unit-wide option, only add it if this is the first active model being processed
+    if (!set.miniatureId && !isFirstActiveModel) {
+      return;
+    }
     set.choices.forEach(choice => {
       const count = wargearCounts[choice.id] || 0;
       if (count > 0) {
@@ -2209,11 +2216,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         const weaponRows: React.ReactNode[] = [];
                         const seenProfiles = new Set<string>();
                         const modelCounts = getRosterUnitModelCounts(unit, ds);
+                        let isFirstActive = true;
 
                         ds.models.forEach(model => {
                           const totalModelCount = modelCounts[model.name] || 0;
                           if (totalModelCount === 0) return;
-                          const activeWeapons = getUnitActiveWeapons(unit, model, totalModelCount);
+                          const activeWeapons = getUnitActiveWeapons(unit, model, totalModelCount, isFirstActive);
+                          isFirstActive = false;
                           activeWeapons.forEach(weapon => {
                             weapon.profiles?.forEach(prof => {
                               const key = `${weapon.name}-${prof.name}-${prof.range}`;
@@ -2270,10 +2279,12 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   const formattedWeapons: string[] = [];
                   if (ds) {
                     const modelCounts = getRosterUnitModelCounts(unit, ds);
+                    let isFirstActive = true;
                     ds.models.forEach(m => {
                       const totalModelCount = modelCounts[m.name] || 0;
                       if (totalModelCount === 0) return;
-                      const activeWeapons = getUnitActiveWeapons(unit, m, totalModelCount);
+                      const activeWeapons = getUnitActiveWeapons(unit, m, totalModelCount, isFirstActive);
+                      isFirstActive = false;
                       activeWeapons.forEach(w => {
                         const formatted = formatCompactWeapon(w);
                         if (!formattedWeapons.includes(formatted)) {
@@ -2578,10 +2589,31 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         {(() => {
           if (!matchedCatalog?.appDatasheet) return null;
           const modelCounts = getRosterUnitModelCounts(unit, matchedCatalog.appDatasheet);
-          const hasDisplayableWargear = matchedCatalog.appDatasheet.models.some(model => {
+
+          const unitWideSets = Array.from(
+            new Map(
+              matchedCatalog.appDatasheet.models
+                .flatMap(model => model.wargearChoiceSets || [])
+                .filter(set => {
+                  if (set.miniatureId) return false;
+                  if (set.choices.length === 0) return false;
+                  if (set.choices.length === 1) {
+                    const choice = set.choices[0];
+                    const firstModel = matchedCatalog.appDatasheet!.models[0];
+                    const isDefault = choice.items.every(item => firstModel?.weapons?.some(w => w.name === item.name));
+                    if (isDefault) return false;
+                  }
+                  return true;
+                })
+                .map(set => [set.id, set])
+            ).values()
+          );
+
+          const hasDisplayableWargear = unitWideSets.length > 0 || matchedCatalog.appDatasheet.models.some(model => {
             const totalModelCount = modelCounts[model.name] || 0;
             if (totalModelCount === 0) return false;
             return (model.wargearChoiceSets || []).some(set => {
+              if (!set.miniatureId) return false; // Filter out unit-wide sets
               if (set.choices.length === 0) return false;
               if (set.choices.length === 1) {
                 const choice = set.choices[0];
@@ -2591,7 +2623,168 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               return true;
             });
           });
+
           if (!hasDisplayableWargear) return null;
+
+          const renderWargearChoiceSet = (set: WargearChoiceSet, totalModelCount: number, model: Model, setIdx: number) => {
+            const isSingleChoiceOptional = set.choices.length === 1;
+            const isSingleChoiceSelect = set.choices.length > 1 && set.limit === 1 && totalModelCount === 1;
+
+            if (isSingleChoiceOptional) {
+              const choice = set.choices[0];
+              const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+              const isChecked = (unit.wargearCounts?.[choice.id] || 0) > 0;
+              return (
+                <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      fontSize: '0.8rem',
+                      color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      userSelect: 'none'
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        handleWargearCountChange(unit.id, choice.id, e.target.checked ? 1 : 0);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    {label}
+                  </label>
+                </div>
+              );
+            } else if (isSingleChoiceSelect) {
+              const selectedChoiceId = set.choices.find(c => (unit.wargearCounts?.[c.id] || 0) > 0)?.id || '';
+              return (
+                <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    Choose 1 option (Limit {set.limit})
+                  </span>
+                  <select
+                    value={selectedChoiceId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setRoster(prev => prev.map(u => {
+                        if (u.id !== unit.id) return u;
+                        const currentCounts = u.wargearCounts ? { ...u.wargearCounts } : {};
+                        set.choices.forEach(c => {
+                          delete currentCounts[c.id];
+                        });
+                        if (val) {
+                          currentCounts[val] = 1;
+                        }
+                        return { ...u, wargearCounts: currentCounts };
+                      }));
+                    }}
+                    style={{
+                      background: 'var(--bg-tertiary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: '6px',
+                      padding: '0.3rem 0.6rem',
+                      fontSize: '0.8rem',
+                      cursor: 'pointer',
+                      width: '100%',
+                      maxWidth: '400px'
+                    }}
+                  >
+                    <option value="">-- Default Loadout --</option>
+                    {set.choices.map((choice, cidx) => {
+                      const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                      return (
+                        <option key={choice.id || cidx} value={choice.id}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              );
+            } else {
+              const maxAllowed = set.limit * (set.miniatureId ? totalModelCount : 1);
+              const setAllocatedCount = set.choices.reduce((sum, choice) => sum + (unit.wargearCounts?.[choice.id] || 0), 0);
+              const remainder = Math.max(0, maxAllowed - setAllocatedCount);
+
+              return (
+                <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', background: 'rgba(0,0,0,0.1)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255,255,255,0.02)', paddingBottom: '0.2rem' }}>
+                    <span>Options (Limit: {maxAllowed})</span>
+                    {totalModelCount > 1 && (
+                      <span style={{ color: remainder > 0 ? 'var(--accent-teal)' : 'var(--text-secondary)' }}>
+                        Default ({model.weapons.map(w => `${w.name}${w.count > 1 ? ` x${w.count}` : ''}`).join(', ')}) remaining: {remainder}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    {set.choices.map((choice, cidx) => {
+                      const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                      const currentCount = unit.wargearCounts?.[choice.id] || 0;
+                      const isDefaultChoice = choice.items.every(item => model.weapons?.some(w => w.name === item.name));
+
+                      if (isDefaultChoice) return null;
+
+                      return (
+                        <div key={choice.id || cidx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', fontSize: '0.75rem' }}>
+                          <span style={{ color: currentCount > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleWargearCountChange(unit.id, choice.id, currentCount - 1)}
+                              disabled={currentCount <= 0}
+                              style={{
+                                width: '20px',
+                                height: '20px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: '1px solid var(--glass-border)',
+                                color: 'var(--text-primary)',
+                                borderRadius: '4px',
+                                cursor: currentCount <= 0 ? 'not-allowed' : 'pointer',
+                                opacity: currentCount <= 0 ? 0.3 : 1
+                              }}
+                            >
+                              -
+                            </button>
+                            <span style={{ minWidth: '15px', textAlign: 'center', fontWeight: currentCount > 0 ? 'bold' : 'normal' }}>
+                              {currentCount}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleWargearCountChange(unit.id, choice.id, currentCount + 1)}
+                              disabled={remainder <= 0}
+                              style={{
+                                width: '20px',
+                                height: '20px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: '1px solid var(--glass-border)',
+                                color: 'var(--text-primary)',
+                                borderRadius: '4px',
+                                cursor: remainder <= 0 ? 'not-allowed' : 'pointer',
+                                opacity: remainder <= 0 ? 0.3 : 1
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+          };
 
           return (
             <div style={{ width: '100%', marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.04)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -2604,6 +2797,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   if (totalModelCount === 0) return null;
 
                   const modelSets = (model.wargearChoiceSets || []).filter(set => {
+                    if (!set.miniatureId) return false; // Filter out unit-wide sets
                     if (set.choices.length === 0) return false;
                     if (set.choices.length === 1) {
                       const choice = set.choices[0];
@@ -2622,168 +2816,24 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                           {model.name} Options ({totalModelCount} models)
                         </div>
                       )}
-                      {modelSets.map((set, setIdx) => {
-                        const isSingleChoiceOptional = set.choices.length === 1;
-                        const isSingleChoiceSelect = set.choices.length > 1 && set.limit === 1 && totalModelCount === 1;
-
-                        if (isSingleChoiceOptional) {
-                          const choice = set.choices[0];
-                          const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
-                          const isChecked = (unit.wargearCounts?.[choice.id] || 0) > 0;
-                          return (
-                            <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                              <label
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.4rem',
-                                  fontSize: '0.8rem',
-                                  color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)',
-                                  cursor: 'pointer',
-                                  userSelect: 'none'
-                                }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={(e) => {
-                                    handleWargearCountChange(unit.id, choice.id, e.target.checked ? 1 : 0);
-                                  }}
-                                  style={{ cursor: 'pointer' }}
-                                />
-                                {label}
-                              </label>
-                            </div>
-                          );
-                        } else if (isSingleChoiceSelect) {
-                          const selectedChoiceId = set.choices.find(c => (unit.wargearCounts?.[c.id] || 0) > 0)?.id || '';
-                          return (
-                            <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                Choose 1 option (Limit {set.limit})
-                              </span>
-                              <select
-                                value={selectedChoiceId}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setRoster(prev => prev.map(u => {
-                                    if (u.id !== unit.id) return u;
-                                    const currentCounts = u.wargearCounts ? { ...u.wargearCounts } : {};
-                                    set.choices.forEach(c => {
-                                      delete currentCounts[c.id];
-                                    });
-                                    if (val) {
-                                      currentCounts[val] = 1;
-                                    }
-                                    return { ...u, wargearCounts: currentCounts };
-                                  }));
-                                }}
-                                style={{
-                                  background: 'var(--bg-tertiary)',
-                                  color: 'var(--text-primary)',
-                                  border: '1px solid var(--glass-border)',
-                                  borderRadius: '6px',
-                                  padding: '0.3rem 0.6rem',
-                                  fontSize: '0.8rem',
-                                  cursor: 'pointer',
-                                  width: '100%',
-                                  maxWidth: '400px'
-                                }}
-                              >
-                                <option value="">-- Default Loadout --</option>
-                                {set.choices.map((choice, cidx) => {
-                                  const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
-                                  return (
-                                    <option key={choice.id || cidx} value={choice.id}>
-                                      {label}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                            </div>
-                          );
-                        } else {
-                          const maxAllowed = set.limit * (set.miniatureId ? totalModelCount : 1);
-                          const setAllocatedCount = set.choices.reduce((sum, choice) => sum + (unit.wargearCounts?.[choice.id] || 0), 0);
-                          const remainder = Math.max(0, maxAllowed - setAllocatedCount);
-
-                          return (
-                            <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', background: 'rgba(0,0,0,0.1)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255,255,255,0.02)', paddingBottom: '0.2rem' }}>
-                                <span>Options (Limit: {maxAllowed})</span>
-                                {totalModelCount > 1 && (
-                                  <span style={{ color: remainder > 0 ? 'var(--accent-teal)' : 'var(--text-secondary)' }}>
-                                    Default ({model.weapons.map(w => `${w.name}${w.count > 1 ? ` x${w.count}` : ''}`).join(', ')}) remaining: {remainder}
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                                {set.choices.map((choice, cidx) => {
-                                  const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
-                                  const currentCount = unit.wargearCounts?.[choice.id] || 0;
-                                  const isDefaultChoice = choice.items.every(item => model.weapons?.some(w => w.name === item.name));
-
-                                  if (isDefaultChoice) return null;
-
-                                  return (
-                                    <div key={choice.id || cidx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', fontSize: '0.75rem' }}>
-                                      <span style={{ color: currentCount > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</span>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleWargearCountChange(unit.id, choice.id, currentCount - 1)}
-                                          disabled={currentCount <= 0}
-                                          style={{
-                                            width: '20px',
-                                            height: '20px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            background: 'rgba(255,255,255,0.05)',
-                                            border: '1px solid var(--glass-border)',
-                                            color: 'var(--text-primary)',
-                                            borderRadius: '4px',
-                                            cursor: currentCount <= 0 ? 'not-allowed' : 'pointer',
-                                            opacity: currentCount <= 0 ? 0.3 : 1
-                                          }}
-                                        >
-                                          -
-                                        </button>
-                                        <span style={{ minWidth: '15px', textAlign: 'center', fontWeight: currentCount > 0 ? 'bold' : 'normal' }}>
-                                          {currentCount}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleWargearCountChange(unit.id, choice.id, currentCount + 1)}
-                                          disabled={remainder <= 0}
-                                          style={{
-                                            width: '20px',
-                                            height: '20px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            background: 'rgba(255,255,255,0.05)',
-                                            border: '1px solid var(--glass-border)',
-                                            color: 'var(--text-primary)',
-                                            borderRadius: '4px',
-                                            cursor: remainder <= 0 ? 'not-allowed' : 'pointer',
-                                            opacity: remainder <= 0 ? 0.3 : 1
-                                          }}
-                                        >
-                                          +
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        }
-                      })}
+                      {modelSets.map((set, setIdx) => renderWargearChoiceSet(set, totalModelCount, model, setIdx))}
                     </div>
                   );
                 })}
+
+                {unitWideSets.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', textAlign: 'left' }}>
+                    {matchedCatalog.appDatasheet.models.length > 1 && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--accent-teal)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                        Unit Options
+                      </div>
+                    )}
+                    {unitWideSets.map((set, setIdx) => {
+                      const firstModel = matchedCatalog.appDatasheet!.models[0];
+                      return renderWargearChoiceSet(set, 1, firstModel, setIdx);
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           );
