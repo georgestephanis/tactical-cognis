@@ -1091,33 +1091,65 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
             </h2>
           </div>
 
-          {/* Faction selector */}
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Select Faction:</span>
-            <select
-              value={selectedFactionSlug || ''}
-              onChange={(e) => {
-                const slug = e.target.value || null;
-                setSelectedFactionSlug(slug);
-                setRoster([]);
-                setSelectedDetachmentSlugs([]);
-                if (!slug) setFactionData(null);
-              }}
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--glass-border)',
-                borderRadius: '8px',
-                padding: '0.5rem 1rem',
-                fontSize: '0.9rem',
-                cursor: 'pointer'
-              }}
-            >
-              <option value="">-- Choose Faction --</option>
-              {Object.entries(FACTION_NAMES).map(([slug, name]) => (
-                <option key={slug} value={slug}>{name}</option>
-              ))}
-            </select>
+          {/* Faction & List selectors */}
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Faction selector */}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Select Faction:</span>
+              <select
+                value={selectedFactionSlug || ''}
+                onChange={(e) => {
+                  const slug = e.target.value || null;
+                  setSelectedFactionSlug(slug);
+                  setRoster([]);
+                  setSelectedDetachmentSlugs([]);
+                  if (!slug) setFactionData(null);
+                }}
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: '8px',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.9rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="">-- Choose Faction --</option>
+                {Object.entries(FACTION_NAMES).map(([slug, name]) => (
+                  <option key={slug} value={slug}>{name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Load selector */}
+            {savedArmies.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Load List:</span>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleLoadRoster(e.target.value);
+                    }
+                  }}
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: '8px',
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.9rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="">-- Load Saved List --</option>
+                  {savedArmies.map(a => (
+                    <option key={a.name} value={a.name}>{a.name} ({a.factionName})</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1133,76 +1165,64 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
             flexWrap: 'wrap',
             gap: '1rem'
           }}>
-            {/* Active List Name */}
+            {/* Active List Name & Action */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Active List:</span>
               <span style={{ fontWeight: 700, color: 'var(--accent-gold)' }}>{currentListName}</span>
+              {currentListName && savedArmies.some(a => a.name === currentListName) && (
+                <button
+                  onClick={() => handleDeleteRoster(currentListName)}
+                  className="button-outline"
+                  style={{
+                    padding: '0.3rem 0.6rem',
+                    fontSize: '0.75rem',
+                    borderColor: 'rgba(239, 68, 68, 0.4)',
+                    color: 'var(--accent-red)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    marginLeft: '0.5rem',
+                    cursor: 'pointer'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                    e.currentTarget.style.borderColor = 'var(--accent-red)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+                  }}
+                  title="Delete this roster from Local Storage"
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+              )}
             </div>
 
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              {/* Load controls */}
-              {savedArmies.length > 0 && (
-                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                  <FolderOpen size={14} style={{ color: 'var(--text-secondary)' }} />
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        handleLoadRoster(e.target.value);
-                      }
-                    }}
-                    style={{
-                      background: 'var(--bg-tertiary)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--glass-border)',
-                      borderRadius: '8px',
-                      padding: '0.4rem 0.8rem',
-                      fontSize: '0.85rem',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="">-- Load Saved List --</option>
-                    {savedArmies.map(a => (
-                      <option key={a.name} value={a.name}>{a.name} ({a.factionName})</option>
-                    ))}
-                  </select>
-                  {currentListName && savedArmies.some(a => a.name === currentListName) && (
-                    <button
-                      onClick={() => handleDeleteRoster(currentListName)}
-                      className="button-outline"
-                      style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Save controls */}
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                <input
-                  type="text"
-                  value={listNameToSave}
-                  onChange={(e) => setListNameToSave(e.target.value)}
-                  placeholder="New list name or save active..."
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--glass-border)',
-                    borderRadius: '8px',
-                    padding: '0.4rem 0.8rem',
-                    fontSize: '0.85rem',
-                    width: '200px'
-                  }}
-                />
-                <button
-                  onClick={handleSaveRoster}
-                  className="button"
-                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                >
-                  <Save size={14} /> Save List
-                </button>
-              </div>
+            {/* Save controls */}
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={listNameToSave}
+                onChange={(e) => setListNameToSave(e.target.value)}
+                placeholder="New list name or save active..."
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: '8px',
+                  padding: '0.4rem 0.8rem',
+                  fontSize: '0.85rem',
+                  width: '200px'
+                }}
+              />
+              <button
+                onClick={handleSaveRoster}
+                className="button"
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+              >
+                <Save size={14} /> Save List
+              </button>
             </div>
           </div>
         )}
@@ -1216,10 +1236,105 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       )}
 
       {!selectedFactionSlug && !loading && (
-        <div className="panel empty-state">
-          <Sword size={48} style={{ color: 'var(--accent-gold)', marginBottom: '1.25rem' }} />
-          <h3>No Faction Loaded</h3>
-          <p>Please select a faction from the drop-down menu above to begin assembling your combat patrol or army roster.</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {savedArmies.length > 0 && (
+            <div className="panel" style={{ padding: '2rem', marginBottom: '0' }}>
+              <h3 style={{ fontSize: '1.25rem', color: 'var(--accent-gold)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <FolderOpen size={20} /> Saved Army Rosters
+              </h3>
+              <div className="army-card-grid">
+                {savedArmies.map(army => {
+                  const totalPoints = army.units.reduce((sum, u) => sum + u.points + (u.enhancementPoints || 0), 0);
+                  return (
+                    <div
+                      key={army.name}
+                      className="army-card"
+                      onClick={() => handleLoadRoster(army.name)}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                          <h4>{army.name}</h4>
+                          <span style={{
+                            fontSize: '0.85rem',
+                            fontWeight: 700,
+                            fontFamily: 'var(--font-mono)',
+                            color: 'var(--accent-teal)',
+                            background: 'rgba(0, 242, 254, 0.06)',
+                            padding: '0.2rem 0.5rem',
+                            borderRadius: '6px',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {totalPoints} / {army.pointLimit} pts
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--accent-gold)', fontWeight: 600 }}>
+                          {army.factionName}
+                        </div>
+                        {army.detachmentSlugs && army.detachmentSlugs.length > 0 && (
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                            {army.detachmentSlugs.length === 1 ? 'Detachment' : 'Detachments'}: {army.detachmentSlugs.map(slug => slug.replace(/-/g, ' ')).join(', ')}
+                          </div>
+                        )}
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 'auto' }}>
+                          {army.units.length} {army.units.length === 1 ? 'Unit' : 'Units'} loaded
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.75rem', marginTop: 'auto' }} onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleLoadRoster(army.name)}
+                          className="button"
+                          style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem', justifyContent: 'center' }}
+                        >
+                          <FolderOpen size={14} /> Load Roster
+                        </button>
+                        <button
+                          onClick={() => handleDeleteRoster(army.name)}
+                          className="button-outline"
+                          style={{
+                            padding: '0.5rem',
+                            fontSize: '0.85rem',
+                            borderColor: 'rgba(239, 68, 68, 0.3)',
+                            color: 'var(--accent-red)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                            e.currentTarget.style.borderColor = 'var(--accent-red)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+                          }}
+                          title="Delete Roster"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="panel empty-state" style={{ marginTop: '0' }}>
+            <Sword size={48} style={{ color: 'var(--accent-gold)', marginBottom: '1.25rem' }} />
+            <h3>No Faction Loaded</h3>
+            <p style={{ marginBottom: '1.5rem' }}>
+              Please select a faction from the drop-down menu above, choose a saved roster, or import an existing list to begin.
+            </p>
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="button-outline"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', margin: '0 auto', cursor: 'pointer' }}
+            >
+              <Upload size={16} /> Import List from Text
+            </button>
+          </div>
         </div>
       )}
 

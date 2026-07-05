@@ -276,6 +276,61 @@ code {
   font-weight: 500;
 }
 
+/* Army List Cards */
+.army-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.army-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+  gap: 1rem;
+}
+
+.army-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--accent-gold);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.army-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(197, 160, 89, 0.3);
+  box-shadow: var(--shadow-md), var(--glow-gold);
+}
+
+.army-card:hover::before {
+  opacity: 1;
+}
+
+.army-card h4 {
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  margin: 0;
+  word-break: break-word;
+}
+
+
 /* Glassmorphism Panel */
 .panel {
   background: var(--glass-bg);
