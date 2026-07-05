@@ -1779,3 +1779,11 @@ code {
 }
 
 
+
+/* Inline <k> keyword markup in rules text (see RulesText.tsx) */
+.rules-keyword {
+  text-decoration: underline dashed;
+  text-decoration-color: var(--accent-teal, currentColor);
+  text-underline-offset: 3px;
+  cursor: help;
+}

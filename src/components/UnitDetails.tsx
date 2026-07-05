@@ -4,6 +4,7 @@ import type { MergedUnit, Weapon, WeaponProfile } from '../types/data';
 import { calculateExpectedDamage, TARGET_PRESETS } from '../utils/mathhammer';
 import type { MathhammerInput } from '../utils/mathhammer';
 import { getDatasheetCosts } from '../utils/dataMapper';
+import RulesText from './RulesText';
 
 interface UnitDetailsProps {
   unit: MergedUnit;
@@ -258,7 +259,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                   {datasheet.abilities.filter(a => a.type === 'datasheet').map((ab, idx) => (
                     <div key={idx} className="datasheet-ability-block">
                       <span className="datasheet-ability-name">{ab.name}</span>
-                      <span style={{ color: 'var(--text-primary)' }}>{ab.rules}</span>
+                      <span style={{ color: 'var(--text-primary)' }}><RulesText text={ab.rules} /></span>
                     </div>
                   ))}
 
@@ -267,7 +268,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                       {datasheet.damageProfiles.map((dp, idx) => (
                         <div key={idx} className="datasheet-ability-block" style={{ borderLeft: '3px solid var(--accent-red)', paddingLeft: '0.5rem' }}>
                           <span className="datasheet-ability-name" style={{ color: 'var(--accent-red)' }}>{dp.name}</span>
-                          <span style={{ color: 'var(--text-primary)' }}>{dp.rules}</span>
+                          <span style={{ color: 'var(--text-primary)' }}><RulesText text={dp.rules} /></span>
                         </div>
                       ))}
                     </div>
@@ -636,7 +637,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                         <span className="badge badge-legends" style={{ fontSize: '0.65rem' }}>{ab.type}</span>
                       </div>
                       <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-primary)', whiteSpace: 'pre-line' }}>
-                        {ab.rules}
+                        <RulesText text={ab.rules} />
                       </p>
                     </div>
                   ))}
@@ -648,7 +649,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                       {datasheet.damageProfiles.map((dp, idx) => (
                         <div key={idx} style={{ background: 'rgba(239, 68, 68, 0.03)', border: '1px solid rgba(239, 68, 68, 0.15)', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '0.5rem' }}>
                           <strong style={{ color: 'var(--accent-red)', fontSize: '0.85rem' }}>{dp.name}</strong>
-                          <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-primary)' }}>{dp.rules}</p>
+                          <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-primary)' }}><RulesText text={dp.rules} /></p>
                         </div>
                       ))}
                     </div>

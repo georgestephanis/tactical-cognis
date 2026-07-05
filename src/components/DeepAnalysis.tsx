@@ -12,6 +12,7 @@ interface FactionSummary {
 }
 
 import { getFactionList, initDatabase } from '../utils/db';
+import RulesText from './RulesText';
 
 export const DeepAnalysis: React.FC = () => {
   // Global Faction List
@@ -898,7 +899,7 @@ export const DeepAnalysis: React.FC = () => {
                             {u.name}
                           </strong>
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem' }}>
-                            Buff: {u.appDatasheet?.abilities.find(a => a.name.toLowerCase() === u.name.toLowerCase())?.rules || 'Standard Character Aura'}
+                            Buff: <RulesText text={u.appDatasheet?.abilities.find(a => a.name.toLowerCase() === u.name.toLowerCase())?.rules || 'Standard Character Aura'} />
                           </span>
                           <div>
                             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>

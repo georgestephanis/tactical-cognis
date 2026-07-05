@@ -3,6 +3,7 @@ import { ChevronLeft, Shield, Sparkles, AlertCircle, RefreshCw, BarChart2, Compa
 import { loadAndMergeFaction, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
 import type { MergedUnit, WeaponProfile } from '../types/data';
+import RulesText from './RulesText';
 
 interface FactionBrowserProps {
   factionSlug: string;
@@ -496,7 +497,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                               <div key={rule.id} style={{ background: 'var(--bg-tertiary)', padding: '1rem 1.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.02)' }}>
                                 <h5 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)', textTransform: 'uppercase', fontSize: '0.95rem' }}>{rule.name}</h5>
                                 {rule.lore && <p style={{ fontStyle: 'italic', color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0 0 0.5rem 0' }}>{rule.lore}</p>}
-                                {rule.rules && <p style={{ whiteSpace: 'pre-line', margin: 0, color: 'var(--text-primary)', fontSize: '0.9rem', lineHeight: '1.5' }}>{rule.rules}</p>}
+                                {rule.rules && <p style={{ whiteSpace: 'pre-line', margin: 0, color: 'var(--text-primary)', fontSize: '0.9rem', lineHeight: '1.5' }}><RulesText text={rule.rules} /></p>}
                               </div>
                             ))}
                           </div>
@@ -541,7 +542,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                                 )}
                                 {enh.rules && (
                                   <p style={{ whiteSpace: 'pre-line', color: 'var(--text-primary)', fontSize: '0.85rem', margin: 0, lineHeight: '1.4' }}>
-                                    {enh.rules}
+                                    <RulesText text={enh.rules} />
                                   </p>
                                 )}
                               </div>
@@ -615,28 +616,28 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                                   {strat.when && (
                                     <div>
                                       <strong style={{ color: 'var(--accent-teal)', textTransform: 'uppercase', fontSize: '0.75rem', display: 'block', marginBottom: '0.1rem' }}>When:</strong>
-                                      <span style={{ color: 'var(--text-primary)' }}>{strat.when}</span>
+                                      <span style={{ color: 'var(--text-primary)' }}><RulesText text={strat.when} /></span>
                                     </div>
                                   )}
 
                                   {strat.target && (
                                     <div>
                                       <strong style={{ color: 'var(--accent-gold)', textTransform: 'uppercase', fontSize: '0.75rem', display: 'block', marginBottom: '0.1rem' }}>Target:</strong>
-                                      <span style={{ color: 'var(--text-primary)' }}>{strat.target}</span>
+                                      <span style={{ color: 'var(--text-primary)' }}><RulesText text={strat.target} /></span>
                                     </div>
                                   )}
 
                                   {strat.effect && (
                                     <div>
                                       <strong style={{ color: 'var(--accent-green)', textTransform: 'uppercase', fontSize: '0.75rem', display: 'block', marginBottom: '0.1rem' }}>Effect:</strong>
-                                      <p style={{ margin: 0, color: 'var(--text-primary)', whiteSpace: 'pre-line', lineHeight: '1.4' }}>{strat.effect}</p>
+                                      <p style={{ margin: 0, color: 'var(--text-primary)', whiteSpace: 'pre-line', lineHeight: '1.4' }}><RulesText text={strat.effect} /></p>
                                     </div>
                                   )}
 
                                   {strat.restrictions && (
                                     <div style={{ marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.02)' }}>
                                       <strong style={{ color: 'var(--accent-red)', textTransform: 'uppercase', fontSize: '0.75rem', display: 'block', marginBottom: '0.1rem' }}>Restrictions:</strong>
-                                      <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>{strat.restrictions}</span>
+                                      <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}><RulesText text={strat.restrictions} /></span>
                                     </div>
                                   )}
 
@@ -674,7 +675,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                   {rule.name}
                 </h3>
                 <p style={{ whiteSpace: 'pre-line', color: 'var(--text-primary)', lineHeight: '1.7', fontSize: '1.05rem' }}>
-                  {rule.rules}
+                  <RulesText text={rule.rules} />
                 </p>
               </div>
             ))
@@ -975,7 +976,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                         {ds.abilities.map((ab, idx) => (
                           <div key={idx} className="print-bw-ability">
                             <span className="print-bw-ability-name">{ab.name} ({ab.type}): </span>
-                            <span>{ab.rules}</span>
+                            <span><RulesText text={ab.rules} /></span>
                           </div>
                         ))}
 
