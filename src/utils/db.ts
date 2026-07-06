@@ -466,12 +466,22 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
     limitedSetsMap.get(String(ls.datasheetId))!.push({ id: ls.id, limit: Number(ls.limit), choices: limitedChoiceMap.get(String(ls.id)) || [] });
   });
 
-  // 8d. Fetch wargear limits
-  const wargearLimits = await query(`
-    SELECT datasheetId, wargearItemId, limitCount, ratioModelCount
-    FROM wargear_limit
-    WHERE datasheetId IN (${dsIds})
-  `);
+  // 8d. Fetch wargear limits. Older companion-app DBs have a wargear_limit
+  // table with a different shape (keyed by limitedWargearChoiceSetId, no
+  // datasheetId) — skip limits entirely for those rather than failing the load.
+  let wargearLimits: Record<string, unknown>[] = [];
+  try {
+    const limitCols = await query(`PRAGMA table_info(wargear_limit)`);
+    if (limitCols.some(c => String(c.name) === 'datasheetId')) {
+      wargearLimits = await query(`
+        SELECT datasheetId, wargearItemId, limitCount, ratioModelCount
+        FROM wargear_limit
+        WHERE datasheetId IN (${dsIds})
+      `);
+    }
+  } catch (err) {
+    console.warn('Skipping wargear limits (incompatible wargear_limit schema):', err);
+  }
   const limitsMap = new Map<string, unknown[]>();
   wargearLimits.forEach(wl => {
     if (!limitsMap.has(String(wl.datasheetId))) limitsMap.set(String(wl.datasheetId), []);
@@ -762,6 +772,230 @@ export const getBattleSizes = async (): Promise<BattleSize[]> => {
     enhancementLimit: Number(r.enhancementLimit),
     duplicateUnitLimit: Number(r.duplicateUnitLimit),
   }));
+};
+
+/**
+ * Faction keyword slugs that don't appear in the app's faction list directly
+ * (they're folded into a meta-faction — the inverse of META_FACTION_MAP).
+ */
+const ROSTER_FACTION_SLUG_MAP: Record<string, string> = {
+  'asuryani': 'aeldari',
+  'harlequins': 'aeldari',
+  'ynnari': 'aeldari',
+  'legiones-daemonica': 'chaos-daemons',
+  'blood-legions': 'chaos-daemons',
+  'plague-legions': 'chaos-daemons',
+  'scintillating-legions': 'chaos-daemons',
+  'legions-of-excess': 'chaos-daemons',
+  'heretic-astartes': 'chaos-space-marines',
+};
+
+export interface SavedDbRosterSummary {
+  id: string;
+  name: string;
+  factionName: string;
+  factionSlug: string;
+  battleSizeName: string | null;
+  pointsLimit: number | null;
+  unitCount: number;
+  modifiedAt: string;
+}
+
+export interface DbRosterUnitDetail {
+  rosterUnitId: string;
+  datasheetName: string;
+  allyType: string;
+  isWarlord: boolean;
+  modelsCount: number;
+  modelCounts: { name: string; count: number }[];
+  wargearCounts: { name: string; count: number }[];
+  enhancementName: string | null;
+  /** roster_unit id of the bodyguard unit this unit is attached to (leaders/support). */
+  attachedToRosterUnitId: string | null;
+}
+
+export interface DbRosterDetail {
+  id: string;
+  name: string;
+  factionName: string;
+  factionSlug: string;
+  detachmentName: string | null;
+  pointsLimit: number | null;
+  units: DbRosterUnitDetail[];
+}
+
+const rosterFactionSlug = (factionName: string): string => {
+  const slug = slugify(factionName);
+  return ROSTER_FACTION_SLUG_MAP[slug] || slug;
+};
+
+/**
+ * Lists army rosters saved in the companion-app database, if any.
+ * Not every uploaded DB has these tables/rows — returns [] instead of throwing.
+ */
+export const getSavedDbRosters = async (): Promise<SavedDbRosterSummary[]> => {
+  try {
+    const hasTable = await query("SELECT name FROM sqlite_master WHERE type='table' AND name='roster'");
+    if (hasTable.length === 0) return [];
+
+    const rows = await query(`
+      SELECT r.id, r.name, r.modifiedAt,
+             fk.name AS factionName,
+             bs.name AS battleSizeName, bs.pointsLimit,
+             (SELECT COUNT(*) FROM roster_unit ru WHERE ru.rosterId = r.id) AS unitCount
+      FROM roster r
+      LEFT JOIN faction_keyword fk ON fk.id = r.factionKeywordId
+      LEFT JOIN battle_size bs ON bs.id = r.battleSizeId
+      ORDER BY r.modifiedAt DESC
+    `);
+
+    return rows.map(r => ({
+      id: String(r.id),
+      name: String(r.name),
+      factionName: String(r.factionName || ''),
+      factionSlug: rosterFactionSlug(String(r.factionName || '')),
+      battleSizeName: r.battleSizeName ? String(r.battleSizeName) : null,
+      pointsLimit: r.pointsLimit != null ? Number(r.pointsLimit) : null,
+      unitCount: Number(r.unitCount) || 0,
+      modifiedAt: String(r.modifiedAt || ''),
+    }));
+  } catch (err) {
+    console.warn('Could not read saved rosters from database:', err);
+    return [];
+  }
+};
+
+/**
+ * Loads the full contents of one saved companion-app roster:
+ * units, per-model counts, wargear selections, enhancements, and leader attachments.
+ */
+export const getDbRosterDetail = async (rosterId: string): Promise<DbRosterDetail | null> => {
+  const rosterRows = await query(`
+    SELECT r.id, r.name, fk.name AS factionName, bs.pointsLimit
+    FROM roster r
+    LEFT JOIN faction_keyword fk ON fk.id = r.factionKeywordId
+    LEFT JOIN battle_size bs ON bs.id = r.battleSizeId
+    WHERE r.id = ?
+  `, [rosterId]);
+  if (rosterRows.length === 0) return null;
+  const rosterRow = rosterRows[0];
+
+  const detachmentRows = await query(`
+    SELECT det.name
+    FROM roster_detachment rd
+    JOIN detachment det ON det.id = rd.detachmentId
+    WHERE rd.rosterId = ?
+  `, [rosterId]);
+
+  const unitRows = await query(`
+    SELECT ru.id, ru.allyType, d.name AS datasheetName
+    FROM roster_unit ru
+    JOIN datasheet d ON d.id = ru.datasheetId
+    WHERE ru.rosterId = ?
+  `, [rosterId]);
+
+  const miniatureRows = await query(`
+    SELECT rum.rosterUnitId, m.name, SUM(rum.count) AS count, MAX(rum.isWarlord) AS isWarlord
+    FROM roster_unit_miniature rum
+    JOIN miniature m ON m.id = rum.miniatureId
+    JOIN roster_unit ru ON ru.id = rum.rosterUnitId
+    WHERE ru.rosterId = ?
+    GROUP BY rum.rosterUnitId, m.name
+  `, [rosterId]);
+
+  // Wargear chosen at the unit level and at the per-miniature level both
+  // resolve to wargear_item names; merge them into one name -> count map per unit.
+  const unitWargearRows = await query(`
+    SELECT ruwo.rosterUnitId, wi.name, SUM(ruwo.count) AS count
+    FROM roster_unit_wargear_option ruwo
+    JOIN wargear_option wo ON wo.id = ruwo.wargearOptionId
+    JOIN wargear_item wi ON wi.id = wo.wargearItemId
+    JOIN roster_unit ru ON ru.id = ruwo.rosterUnitId
+    WHERE ru.rosterId = ?
+    GROUP BY ruwo.rosterUnitId, wi.name
+  `, [rosterId]);
+
+  const miniatureWargearRows = await query(`
+    SELECT rum.rosterUnitId, wi.name, SUM(rumwo.count) AS count
+    FROM roster_unit_miniature_wargear_option rumwo
+    JOIN roster_unit_miniature rum ON rum.id = rumwo.rosterUnitMiniatureId
+    JOIN wargear_option wo ON wo.id = rumwo.wargearOptionId
+    JOIN wargear_item wi ON wi.id = wo.wargearItemId
+    JOIN roster_unit ru ON ru.id = rum.rosterUnitId
+    WHERE ru.rosterId = ?
+    GROUP BY rum.rosterUnitId, wi.name
+  `, [rosterId]);
+
+  const enhancementRows = await query(`
+    SELECT rum.rosterUnitId, e.name
+    FROM roster_unit_miniature_enhancement rume
+    JOIN roster_unit_miniature rum ON rum.id = rume.rosterUnitMiniatureId
+    JOIN enhancement e ON e.id = rume.enhancementId
+    JOIN roster_unit ru ON ru.id = rum.rosterUnitId
+    WHERE ru.rosterId = ?
+  `, [rosterId]);
+
+  const attachmentRows = await query(`
+    SELECT raur.rosterAttachedUnitId, raur.rosterUnitId, raur.attachmentType
+    FROM roster_attached_unit_roster_unit raur
+    JOIN roster_attached_unit rau ON rau.id = raur.rosterAttachedUnitId
+    WHERE rau.rosterId = ?
+  `, [rosterId]);
+
+  // Within each attached-unit group, leaders and support units attach to the bodyguard unit.
+  const attachedToMap = new Map<string, string>();
+  const groups = new Map<string, { bodyguardId: string | null; others: string[] }>();
+  attachmentRows.forEach(row => {
+    const groupId = String(row.rosterAttachedUnitId);
+    if (!groups.has(groupId)) groups.set(groupId, { bodyguardId: null, others: [] });
+    const group = groups.get(groupId)!;
+    if (String(row.attachmentType) === 'bodyguard') {
+      group.bodyguardId = String(row.rosterUnitId);
+    } else {
+      group.others.push(String(row.rosterUnitId));
+    }
+  });
+  groups.forEach(group => {
+    if (group.bodyguardId) {
+      group.others.forEach(id => attachedToMap.set(id, group.bodyguardId!));
+    }
+  });
+
+  const units: DbRosterUnitDetail[] = unitRows.map(u => {
+    const unitId = String(u.id);
+    const minis = miniatureRows.filter(m => String(m.rosterUnitId) === unitId);
+    const wargearByName = new Map<string, number>();
+    [...unitWargearRows, ...miniatureWargearRows]
+      .filter(w => String(w.rosterUnitId) === unitId)
+      .forEach(w => {
+        const name = String(w.name);
+        wargearByName.set(name, (wargearByName.get(name) || 0) + Number(w.count));
+      });
+    const enhancement = enhancementRows.find(e => String(e.rosterUnitId) === unitId);
+
+    return {
+      rosterUnitId: unitId,
+      datasheetName: String(u.datasheetName),
+      allyType: String(u.allyType || 'native'),
+      isWarlord: minis.some(m => Number(m.isWarlord) === 1),
+      modelsCount: minis.reduce((sum, m) => sum + Number(m.count), 0),
+      modelCounts: minis.map(m => ({ name: String(m.name), count: Number(m.count) })),
+      wargearCounts: Array.from(wargearByName.entries()).map(([name, count]) => ({ name, count })),
+      enhancementName: enhancement ? String(enhancement.name) : null,
+      attachedToRosterUnitId: attachedToMap.get(unitId) || null,
+    };
+  });
+
+  const factionName = String(rosterRow.factionName || '');
+  return {
+    id: String(rosterRow.id),
+    name: String(rosterRow.name),
+    factionName,
+    factionSlug: rosterFactionSlug(factionName),
+    detachmentName: detachmentRows.length > 0 ? String(detachmentRows[0].name) : null,
+    pointsLimit: rosterRow.pointsLimit != null ? Number(rosterRow.pointsLimit) : null,
+    units,
+  };
 };
 
 export const getDbStats = async () => {

@@ -16,8 +16,8 @@ import {
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
-import { getBattleSizes, getFactionList } from '../utils/db';
-import type { BattleSize } from '../utils/db';
+import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
+import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
 import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet } from '../types/data';
 
 
@@ -27,6 +27,12 @@ interface ParsedRosterUnit {
   isWarlord: boolean;
   enhancementName?: string;
   rawModelCounts: { name: string; count: number }[];
+  /** Exact model count when the source provides one (DB imports); overrides summing rawModelCounts. */
+  modelsCount?: number;
+  /** Stable source-side ID, used to resolve leader attachments after matching. */
+  sourceId?: string;
+  /** sourceId of the bodyguard unit this unit is attached to. */
+  attachedToSourceId?: string;
 }
 
 interface ParsedRoster {
@@ -42,9 +48,11 @@ function findBestCostIndex(costs: { points: number; models: number }[], parsedPo
   if (!costs || costs.length === 0) return 0;
   if (costs.length === 1) return 0;
 
-  const exactPointsIdx = costs.findIndex(c => c.points === parsedPoints);
-  if (exactPointsIdx !== -1) {
-    return exactPointsIdx;
+  if (parsedPoints > 0) {
+    const exactPointsIdx = costs.findIndex(c => c.points === parsedPoints);
+    if (exactPointsIdx !== -1) {
+      return exactPointsIdx;
+    }
   }
 
   const exactModelsIdx = costs.findIndex(c => c.models === parsedModels);
@@ -62,6 +70,32 @@ function findBestCostIndex(costs: { points: number; models: number }[], parsedPo
     }
   }
   return bestIdx;
+}
+
+/**
+ * Converts a roster read from the companion-app database into the same
+ * ParsedRoster shape the text importer produces, so both flows share
+ * applyParsedRoster's matching/validation logic. Unlike text imports the
+ * DB gives exact datasheet names, model counts, and leader attachments.
+ */
+function dbRosterToParsed(detail: DbRosterDetail): ParsedRoster {
+  return {
+    rosterName: detail.name,
+    factionSlug: detail.factionSlug,
+    factionName: detail.factionName,
+    detachmentName: detail.detachmentName,
+    pointLimit: detail.pointsLimit || 2000,
+    units: detail.units.map(u => ({
+      name: u.datasheetName,
+      points: 0, // Not stored in the DB; applyParsedRoster derives it from the matched cost tier.
+      isWarlord: u.isWarlord,
+      enhancementName: u.enhancementName ?? undefined,
+      modelsCount: u.modelsCount,
+      sourceId: u.rosterUnitId,
+      attachedToSourceId: u.attachedToRosterUnitId ?? undefined,
+      rawModelCounts: [...u.modelCounts, ...u.wargearCounts],
+    })),
+  };
 }
 
 function findFactionSlugByName(textLine: string, dbFactions: { faction: string; slug: string }[]): { slug: string; name: string } | null {
@@ -796,6 +830,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [importText, setImportText] = useState<string>('');
 
+  // Rosters saved inside the uploaded companion-app database (may be empty)
+  const [dbRosters, setDbRosters] = useState<SavedDbRosterSummary[]>([]);
+  const [importingDbRosterId, setImportingDbRosterId] = useState<string | null>(null);
+
+  useEffect(() => {
+    getSavedDbRosters()
+      .then(setDbRosters)
+      .catch(err => console.error('Failed to check database for saved rosters:', err));
+  }, []);
+
   // Export/Share states
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [shareFormat, setShareFormat] = useState<'app' | 'standard' | 'wtc'>('app');
@@ -921,13 +965,17 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     const newRosterUnits: RosterUnit[] = [];
     const warnings: string[] = [];
+    const sourceIdToRosterId = new Map<string, string>();
+
+    // Allied units (e.g. Agents of the Imperium) live in a separate collection.
+    const matchableUnits = [...faction.units, ...(faction.alliedUnits || [])];
 
     for (const parsedUnit of parsed.units) {
       const normParsedName = normalizeName(parsedUnit.name);
 
-      let matchedUnit = faction.units.find(u => normalizeName(u.name) === normParsedName);
+      let matchedUnit = matchableUnits.find(u => normalizeName(u.name) === normParsedName);
       if (!matchedUnit) {
-        matchedUnit = faction.units.find(u => {
+        matchedUnit = matchableUnits.find(u => {
           const normCatalog = normalizeName(u.name);
           return normCatalog.includes(normParsedName) || normParsedName.includes(normCatalog);
         });
@@ -943,7 +991,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       const isCharacter = keywords.some(k => k.toLowerCase() === 'character');
       const isBattleline = keywords.some(k => k.toLowerCase() === 'battleline');
 
-      const parsedModelsCount = parsedUnit.rawModelCounts.reduce((sum, item) => sum + item.count, 0);
+      const parsedModelsCount = parsedUnit.modelsCount ?? parsedUnit.rawModelCounts.reduce((sum, item) => sum + item.count, 0);
 
       const costs: { points: number; models: number }[] = [];
       if (matchedUnit.appDatasheet?.compositions) {
@@ -1018,8 +1066,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         });
       }
 
+      const newUnitId = makeRosterUnitId(matchedUnit.slug);
+      if (parsedUnit.sourceId) {
+        sourceIdToRosterId.set(parsedUnit.sourceId, newUnitId);
+      }
+
       newRosterUnits.push({
-        id: makeRosterUnitId(matchedUnit.slug),
+        id: newUnitId,
         unitSlug: matchedUnit.slug,
         name: matchedUnit.name,
         points: actualPoints,
@@ -1035,6 +1088,18 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         wargearCounts
       });
     }
+
+    // Resolve leader/support attachments now that all units have roster IDs.
+    parsed.units.forEach(parsedUnit => {
+      if (!parsedUnit.sourceId || !parsedUnit.attachedToSourceId) return;
+      const unitId = sourceIdToRosterId.get(parsedUnit.sourceId);
+      const targetId = sourceIdToRosterId.get(parsedUnit.attachedToSourceId);
+      if (!unitId || !targetId) return;
+      const unit = newRosterUnits.find(u => u.id === unitId);
+      if (unit) {
+        unit.attachedToId = targetId;
+      }
+    });
 
     setRoster(newRosterUnits);
 
@@ -1067,6 +1132,37 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     } catch (err) {
       console.error('Failed to load faction data for import:', err);
       alert('Failed to load faction data for the imported roster.');
+    }
+  };
+
+  // Import a roster saved inside the companion-app database.
+  const handleImportDbRoster = async (rosterId: string) => {
+    setImportingDbRosterId(rosterId);
+    try {
+      const detail = await getDbRosterDetail(rosterId);
+      if (!detail || detail.units.length === 0) {
+        alert('This roster appears to be empty — nothing to import.');
+        return;
+      }
+
+      const parsed = dbRosterToParsed(detail);
+      if (!parsed.factionSlug) {
+        alert('Could not determine which faction this roster belongs to.');
+        return;
+      }
+
+      if (parsed.factionSlug === selectedFactionSlug && factionData) {
+        applyParsedRoster(parsed, factionData);
+        setIsImportModalOpen(false);
+        setImportText('');
+      } else {
+        await importIntoFaction(parsed, parsed.factionSlug!);
+      }
+    } catch (err) {
+      console.error('Failed to import roster from database:', err);
+      alert('Failed to import this roster from the database.');
+    } finally {
+      setImportingDbRosterId(null);
     }
   };
 
@@ -3030,6 +3126,54 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
             </button>
           </div>
           <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', background: 'var(--bg-primary)' }}>
+            {dbRosters.length > 0 && (
+              <div>
+                <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                  Rosters Found In Your Database
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {dbRosters.map(r => (
+                    <div
+                      key={r.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '0.75rem',
+                        background: 'var(--bg-tertiary)',
+                        border: '1px solid var(--glass-border)',
+                        borderRadius: '8px',
+                        padding: '0.6rem 0.75rem'
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.name}
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                          {r.factionName}
+                          {r.pointsLimit ? ` · ${r.pointsLimit} pts` : ''}
+                          {` · ${r.unitCount} unit${r.unitCount === 1 ? '' : 's'}`}
+                        </div>
+                      </div>
+                      <button
+                        className="button"
+                        onClick={() => handleImportDbRoster(r.id)}
+                        disabled={importingDbRosterId !== null}
+                        style={{ fontSize: '0.8rem', padding: '0.35rem 0.9rem', flexShrink: 0 }}
+                      >
+                        {importingDbRosterId === r.id ? 'Importing…' : 'Import'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ margin: '0.85rem 0 0 0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ flex: 1, height: '1px', background: 'var(--glass-border)' }} />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>or paste export text</span>
+                  <div style={{ flex: 1, height: '1px', background: 'var(--glass-border)' }} />
+                </div>
+              </div>
+            )}
             <textarea
               value={importText}
               onChange={(e) => setImportText(e.target.value)}
