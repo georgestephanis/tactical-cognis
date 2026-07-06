@@ -217,6 +217,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       seenDetachmentIds.add(id);
 
       mergedDetachments.push({
+        id,
         name: String(appDet.name),
         slug: String(appDet.slug),
         isCombatPatrol: !!appDet.isCombatPatrol,

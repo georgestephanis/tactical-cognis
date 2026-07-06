@@ -494,7 +494,7 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
   const miniMap = new Map();
   miniatures.forEach(m => {
     const kws = miniKeywords.filter(k => k.miniatureId === m.id).map(k => String(k.name));
-    miniMap.set(String(m.id), { id: m.id, name: m.name, statlineHidden: !!m.statlineHidden, stats: { M: String(m.M), T: String(m.T), Sv: String(m.Sv), W: String(m.W), Ld: String(m.Ld), OC: String(m.OC), Inv: invForMini(m.datasheetId, m.id) }, keywords: kws, weapons: miniWeaponsMap.get(String(m.id)) || [], choiceSets: (choiceSetsMap.get(String(m.datasheetId)) || []).filter((cs: { miniatureId: string | null }) => cs.miniatureId === m.id) });
+    miniMap.set(String(m.id), { id: m.id, name: m.name, statlineHidden: !!m.statlineHidden, stats: { M: String(m.M), T: String(m.T), Sv: String(m.Sv), W: String(m.W), Ld: String(m.Ld), OC: String(m.OC), Inv: invForMini(m.datasheetId, m.id) }, keywords: kws, weapons: miniWeaponsMap.get(String(m.id)) || [], choiceSets: ((choiceSetsMap.get(String(m.datasheetId)) || []) as { miniatureId: string | null }[]).filter(cs => cs.miniatureId === m.id) });
   });
 
   const compMap = new Map<string, unknown[]>();

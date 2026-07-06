@@ -198,6 +198,7 @@ export interface AppFactionData {
 }
 
 export interface MergedDetachment {
+  id: string;
   name: string;
   slug: string;
   isCombatPatrol: boolean;

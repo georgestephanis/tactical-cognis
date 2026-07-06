@@ -18,7 +18,7 @@ import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/
 import type { MergedFaction } from '../utils/dataMapper';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
-import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet } from '../types/data';
+import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet } from '../types/data';
 
 
 interface ParsedRosterUnit {
