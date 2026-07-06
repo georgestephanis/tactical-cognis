@@ -667,6 +667,7 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
   `);
 
   // Fetch enhancements
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let enhancements: any[] = [];
   try {
     const enhCols = await query(`PRAGMA table_info(enhancement)`);
@@ -698,6 +699,7 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
   }
 
   // Fetch required keywords for enhancements
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let requiredKeywords: any[] = [];
   try {
     requiredKeywords = await query(`
@@ -717,6 +719,7 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
   }
 
   // Fetch excluded keywords for enhancements
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let excludedKeywords: any[] = [];
   try {
     excludedKeywords = await query(`

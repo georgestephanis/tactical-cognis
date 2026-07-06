@@ -680,13 +680,21 @@ function canAttachCharacterToSquad(
   const bgCatalog = factionData.units.find(u => u.slug === bodyguard.unitSlug) || (factionData.alliedUnits && factionData.alliedUnits.find(u => u.slug === bodyguard.unitSlug));
   if (!bgCatalog) return { allowed: true };
 
-  // Classify current character
+  // Get all characters currently attached to this bodyguard
+  const attached = roster.filter(u => u.attachedToId === bodyguard.id && u.id !== character.id);
+
+  // Enforce 1-enhancement-per-attached-unit rule (25.04)
+  const prospectiveEnhancements =
+    (character.enhancementName ? 1 : 0) +
+    (bodyguard.enhancementName ? 1 : 0) +
+    attached.reduce((sum, u) => sum + (u.enhancementName ? 1 : 0), 0);
+
+  if (prospectiveEnhancements > 1) {
+    return { allowed: false, reason: 'Attached group cannot have >1 enhancement' };
+  }
   const isSupport = charCatalog.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
   const isWarboss = charCatalog.appDatasheet?.models?.[0]?.keywords?.some(k => k.toLowerCase() === 'warboss') || false;
 
-  // Get all characters currently attached to this bodyguard
-  const attached = roster.filter(u => u.attachedToId === bodyguard.id && u.id !== character.id);
-  
   // Calculate attached counts
   let numLeaders = 0;
   let numSupports = 0;
@@ -1026,7 +1034,7 @@ function getPrintableCardsRoster(
     }));
   }
 
-  const serializeRawCard = (c: any, ignoreAttachment: boolean = false): string => {
+  const serializeRawCard = (c: RosterUnit & { virtualName?: string; virtualModelsCount?: number; virtualPoints?: number }, ignoreAttachment: boolean = false): string => {
     let attachmentKey = 'no-attach';
     if (!ignoreAttachment) {
       if (c.isCharacter) {
@@ -2006,7 +2014,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       }
     });
 
-    // 5. Leader compatibility checks
+    // 5. Leader compatibility and attachment checks
     roster.forEach(u => {
       if (u.isCharacter && u.attachedToId) {
         const targetBodyguard = roster.find(t => t.id === u.attachedToId);
@@ -2017,6 +2025,19 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           if (!isComp) {
             validationErrors.push(`Compatibility mismatch: Leader character "${u.name}" cannot attach to "${targetBodyguard.name}".`);
           }
+          const check = canAttachCharacterToSquad(u, targetBodyguard, roster, factionData);
+          if (!check.allowed) {
+            validationErrors.push(`Attachment limit violation: "${u.name}" cannot attach to "${targetBodyguard.name}" (${check.reason}).`);
+          }
+        }
+      }
+
+      if (!u.isCharacter) {
+        const attachedLeaders = roster.filter(c => c.isCharacter && c.attachedToId === u.id);
+        const combinedGroup = [u, ...attachedLeaders];
+        const enhanced = combinedGroup.filter(g => g.enhancementName);
+        if (enhanced.length > 1) {
+          validationErrors.push(`Exceeded enhancement limit: Attached unit comprising "${u.name}" has ${enhanced.length} enhancements: ${enhanced.map(g => `"${g.enhancementName}" on ${g.name}`).join(', ')} (Max is 1).`);
         }
       }
     });
@@ -3064,7 +3085,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               <div className="print-cards-grid">
                 {(() => {
                   const cardList = getPrintableCardsRoster(roster, factionData, collapseDuplicates);
-                  return cardList.map(({ id, unit, count, pointsDisplay }) => {
+                  return cardList.map(({ id, unit, pointsDisplay }) => {
                     const matched = findCatalogUnit(unit.unitSlug);
                     const ds = matched?.appDatasheet;
                     const firstModel = ds?.models?.[0];
@@ -3192,8 +3213,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
                     </div>
                   );
-                })}
-              </div>
+                })
+              })()}
+            </div>
             )}
 
           </div>
@@ -3333,59 +3355,82 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
           {/* 3. Upgrades / Enhancements selection (if eligible enhancements exist or detachment is not selected) */}
           {selectedDetachments.length > 0 ? (
-            eligibleEnhancements.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Detachment Upgrade</span>
-                <select
-                  value={unit.enhancementName || ''}
-                  onChange={(e) => handleSelectEnhancement(unit.id, e.target.value)}
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--glass-border)',
-                    borderRadius: '6px',
-                    padding: '0.3rem 0.6rem',
-                    fontSize: '0.8rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <option value="none">-- Select Upgrade --</option>
-                  {selectedDetachments.length === 1 ? (
-                    eligibleEnhancements.map(e => {
-                      const alreadySelectedCount = roster.filter(u => u.id !== unit.id && u.enhancementName === e.name).length;
-                      const isLimitReached = alreadySelectedCount >= (e.limit ?? 1);
-                      return (
-                        <option key={e.name} value={e.name} disabled={isLimitReached}>
-                          {e.name} (+{e.pointsCost} pts){isLimitReached ? ' (Limit Reached)' : ''}
-                        </option>
-                      );
-                    })
-                  ) : (
-                    selectedDetachments.map(d => {
-                      const detEligible = d.enhancements.filter(e => {
-                        if (isEpicHero) return !!e.isEquipableByEpicHero;
-                        if (!unit.isCharacter) return !!e.isEquipableByNonCharacterUnit;
-                        return true;
-                      }).filter(e => isUnitEligibleForEnhancement(keywords, e));
-                      if (detEligible.length === 0) return null;
-                      return (
-                        <optgroup key={d.slug} label={d.name}>
-                          {detEligible.map(e => {
-                            const alreadySelectedCount = roster.filter(u => u.id !== unit.id && u.enhancementName === e.name).length;
-                            const isLimitReached = alreadySelectedCount >= (e.limit ?? 1);
-                            return (
-                              <option key={e.name} value={e.name} disabled={isLimitReached}>
-                                {e.name} (+{e.pointsCost} pts){isLimitReached ? ' (Limit Reached)' : ''}
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      );
-                    })
-                  )}
-                </select>
-              </div>
-            )
+            (() => {
+              const attachedGroupHasEnhancement = (() => {
+                if (unit.isCharacter) {
+                  if (unit.attachedToId) {
+                    const bodyguard = roster.find(r => r.id === unit.attachedToId);
+                    if (bodyguard?.enhancementName) return true;
+                    const others = roster.filter(r => r.attachedToId === unit.attachedToId && r.id !== unit.id);
+                    if (others.some(r => r.enhancementName)) return true;
+                  }
+                } else {
+                  const attached = roster.filter(r => r.attachedToId === unit.id);
+                  if (attached.some(r => r.enhancementName)) return true;
+                }
+                return false;
+              })();
+
+              return eligibleEnhancements.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Detachment Upgrade</span>
+                  <select
+                    value={unit.enhancementName || ''}
+                    onChange={(e) => handleSelectEnhancement(unit.id, e.target.value)}
+                    style={{
+                      background: 'var(--bg-tertiary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: '6px',
+                      padding: '0.3rem 0.6rem',
+                      fontSize: '0.8rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="none">
+                      {attachedGroupHasEnhancement && !unit.enhancementName
+                        ? '-- Attached group has enhancement --'
+                        : '-- Select Upgrade --'}
+                    </option>
+                    {selectedDetachments.length === 1 ? (
+                      eligibleEnhancements.map(e => {
+                        const alreadySelectedCount = roster.filter(u => u.id !== unit.id && u.enhancementName === e.name).length;
+                        const isLimitReached = alreadySelectedCount >= (e.limit ?? 1);
+                        const disabled = isLimitReached || (attachedGroupHasEnhancement && !unit.enhancementName);
+                        return (
+                          <option key={e.name} value={e.name} disabled={disabled}>
+                            {e.name} (+{e.pointsCost} pts){isLimitReached ? ' (Limit Reached)' : ''}
+                          </option>
+                        );
+                      })
+                    ) : (
+                      selectedDetachments.map(d => {
+                        const detEligible = d.enhancements.filter(e => {
+                          if (isEpicHero) return !!e.isEquipableByEpicHero;
+                          if (!unit.isCharacter) return !!e.isEquipableByNonCharacterUnit;
+                          return true;
+                        }).filter(e => isUnitEligibleForEnhancement(keywords, e));
+                        if (detEligible.length === 0) return null;
+                        return (
+                          <optgroup key={d.slug} label={d.name}>
+                            {detEligible.map(e => {
+                              const alreadySelectedCount = roster.filter(u => u.id !== unit.id && u.enhancementName === e.name).length;
+                              const isLimitReached = alreadySelectedCount >= (e.limit ?? 1);
+                              const disabled = isLimitReached || (attachedGroupHasEnhancement && !unit.enhancementName);
+                              return (
+                                <option key={e.name} value={e.name} disabled={disabled}>
+                                  {e.name} (+{e.pointsCost} pts){isLimitReached ? ' (Limit Reached)' : ''}
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                        );
+                      })
+                    )}
+                  </select>
+                </div>
+              );
+            })()
           ) : (
             (unit.isCharacter || hasFactionNonCharEnh) && (
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', alignSelf: 'flex-end', paddingBottom: '0.25rem' }}>
