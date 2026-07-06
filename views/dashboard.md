@@ -6,8 +6,8 @@ The **Dashboard** serves as the central hub of the application once a database i
 
 ## 📸 Component Reference
 
-- **React Component:** [Dashboard.tsx](file:///Users/georgestephanis/code/tactical-cognis/src/components/Dashboard.tsx)
-- **Styling Hooks:** Styled using class definitions in [src/index.css](file:///Users/georgestephanis/code/tactical-cognis/src/index.css) (`.panel`, `.faction-grid`, `.faction-card`, `.search-container`, `.search-input`, `.search-icon`, `.empty-state`).
+- **React Component:** [Dashboard.tsx](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/components/Dashboard.tsx)
+- **Styling Hooks:** Styled using class definitions in [src/index.css](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/index.css) (`.panel`, `.faction-grid`, `.faction-card`, `.search-container`, `.search-input`, `.search-icon`, `.empty-state`).
 
 ---
 
@@ -16,7 +16,7 @@ The **Dashboard** serves as the central hub of the application once a database i
 ### 1. Database Initialization & Indexing
 On component mount, `useEffect` triggers the asynchronous database setup:
 - Confirms initialization of `/40k.sqlite` in memory.
-- Calls `getDbStats()` (defined in [src/utils/db.ts](file:///Users/georgestephanis/code/tactical-cognis/src/utils/db.ts)) to retrieve general data counts.
+- Calls `getDbStats()` (defined in [src/utils/db.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/db.ts)) to retrieve general data counts.
 - Calls `getFactionList()` to retrieve all unique faction definitions from the database and calculate the number of units and detachments associated with each.
 - Resolves loading state once both metrics have finished fetching.
 

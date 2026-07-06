@@ -6,8 +6,8 @@ The **Database Upload View** is the initial gatekeeper screen for the applicatio
 
 ## 📸 Component Reference
 
-- **React Component:** [DatabaseUploadView.tsx](file:///Users/georgestephanis/code/tactical-cognis/src/components/DatabaseUploadView.tsx)
-- **Styling Hooks:** Defined under `DATABASE UPLOAD SCREEN - TACTICAL COGNIS THEME` in [src/index.css](file:///Users/georgestephanis/code/tactical-cognis/src/index.css)
+- **React Component:** [DatabaseUploadView.tsx](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/components/DatabaseUploadView.tsx)
+- **Styling Hooks:** Defined under `DATABASE UPLOAD SCREEN - TACTICAL COGNIS THEME` in [src/index.css](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/index.css)
 
 ---
 
@@ -21,7 +21,7 @@ The component uses standard HTML5 drag-and-drop event listeners to handle local 
 ### 2. Processing & Integrity Checks
 The `processFile(file)` function runs the following asynchronous validation pipeline:
 - **Sanity check:** Reads the first 15 bytes of the file using `ArrayBuffer.slice()` and decodes them with `TextDecoder`. If the header does not start with `"SQLite format 3"`, it aborts with a formatting error.
-- **WASM Database Mount:** Initializes the SQL.js database engine inside browser memory via `initDatabaseFromBuffer(uint8)` (defined in [src/utils/db.ts](file:///Users/georgestephanis/code/tactical-cognis/src/utils/db.ts)).
+- **WASM Database Mount:** Initializes the SQL.js database engine inside browser memory via `initDatabaseFromBuffer(uint8)` (defined in [src/utils/db.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/db.ts)).
 - **Content Verification:** Queries `getDbStats()`. If the result indicates zero records inside the `datasheet` table, it rejects the file as not containing Warhammer 40k companion schemas.
 - **Success Handshake:** On validation, it triggers the parent callback `onDbLoaded(stats.dataVersion)`, which updates the top-level app state to unlocked.
 

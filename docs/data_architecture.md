@@ -23,7 +23,7 @@ graph LR
 
 ## 🔌 Database Layer (`db.ts`)
 
-Located in [src/utils/db.ts](file:///Users/georgestephanis/code/tactical-cognis/src/utils/db.ts), this file is the sole interface that interacts directly with the `sql.js` WASM engine.
+Located in [src/utils/db.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/db.ts), this file is the sole interface that interacts directly with the `sql.js` WASM engine.
 
 ### 1. Initialization Logic (`initDatabase`)
 - Checks if the library is already active.
@@ -41,12 +41,17 @@ Located in [src/utils/db.ts](file:///Users/georgestephanis/code/tactical-cognis/
   - `wargear_item_profile` & `base_miniature_loadout`: Maps baseline weapons configurations.
 - **`getDetachmentsByFaction(factionSlug)`:** Resolves detachment rules, stratagems, enhancements, and unique keyword restrictions.
 - **`getFactionList()`:** Computes top-level statistics (counts of units and detachments per faction) directly from the database to populate the Home dashboard.
+- **`getAlliedUnitsForFaction(factionSlug)` / `getAlliedLimitsForFaction(factionSlug)`:** Resolve the `allied_faction*` tables into allied datasheets (surfaced as `MergedFaction.alliedUnits`) and per-ally points caps (`MergedFaction.alliedLimits`) used by the Army Builder's Allies category and validation.
+- **`getSavedDbRosters()` / `getDbRosterDetail(rosterId)`:** Read the user's own saved army lists out of the companion app's `roster*` tables — units, per-model counts, wargear selections, enhancements, warlord flags, and leader→bodyguard attachment groups — so the Army Builder can import them directly. Both tolerate databases without roster tables (`getSavedDbRosters()` returns `[]` rather than throwing), and faction keywords that the app folds into meta-factions (e.g. Heretic Astartes) are remapped to their importable slug.
+
+### 3. Schema-Version Tolerance
+Uploaded databases come from different companion-app versions, so queries against tables whose shape changed between versions are guarded. Example: per-datasheet wargear limits are only queried after a `PRAGMA table_info(wargear_limit)` check confirms the `datasheetId` column exists; older DBs (where `wargear_limit` is keyed by `limitedWargearChoiceSetId`) skip wargear limits instead of failing the entire faction load.
 
 ---
 
 ## 🗺️ Mapping Layer (`dataMapper.ts`)
 
-Located in [src/utils/dataMapper.ts](file:///Users/georgestephanis/code/tactical-cognis/src/utils/dataMapper.ts), this file bridges database row states with React domain interfaces.
+Located in [src/utils/dataMapper.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/dataMapper.ts), this file bridges database row states with React domain interfaces.
 
 ### 1. Cache Control
 Because complex SQL joins are computationally expensive on the single-threaded WASM thread, `loadAndMergeFaction(factionSlug)` utilizes an in-memory cache:
@@ -66,7 +71,7 @@ SQLite stores points cost tiers in `unit_composition` (a text column of points a
 
 ## 🏷️ TypeScript Entity Specifications
 
-The core types are defined in [src/types/data.ts](file:///Users/georgestephanis/code/tactical-cognis/src/types/data.ts) and govern the states:
+The core types are defined in [src/types/data.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/types/data.ts) and govern the states:
 
 ### 1. `MergedUnit`
 Unifies the metadata used by Faction cards, detail overlays, and the Army Builder catalog:
@@ -78,6 +83,8 @@ export interface MergedUnit {
   pointsRange: { min: number; max: number };
   isCombatPatrol: boolean;
   isFactionPack?: boolean;
+  isAllied?: boolean; // Unit comes from an allied faction (Army Builder "Allies" category)
+  requiredDetachmentIds?: string[]; // Allied unit only selectable in these detachments
 }
 ```
 
@@ -100,5 +107,6 @@ export interface RosterUnit {
   isWarlord?: boolean;
   selectedWargearChoices?: Record<string, string[]>; // choiceSetId -> choiceId[]
   wargearCounts?: Record<string, number>; // choiceId -> count selected
+  splitSquad?: boolean; // Squad is split into two halves pre-game (Combat Squads)
 }
 ```

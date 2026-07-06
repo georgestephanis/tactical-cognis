@@ -148,7 +148,11 @@ the shape doesn't.
 
 `roster*`, `battle*`, `favourite`, `entitlement`, `roster_validation_state` — the
 app user's own saved armies, battle tracker, purchases and favourites. Empty or
-near-empty in a fresh extraction; **ignore these when reading the dataset.**
+near-empty in a fresh extraction; ignore these when reading the *dataset* — but
+the `roster*` family is no longer ignored by the app: the Army Builder's Import
+modal reads any saved army lists it finds there (see `getSavedDbRosters` /
+`getDbRosterDetail` below) so users can pull their companion-app rosters straight
+into the builder.
 
 ## What Tactical Cognis actually queries
 
@@ -160,15 +164,24 @@ All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
 | Units per faction (`getUnitsByFaction`) | `datasheet`, `publication`, `datasheet_faction_keyword`, `miniature`, `miniature_keyword`, `keyword`, `unit_composition(_miniature)`, `datasheet_points_step`, `datasheet_datasheet_ability`, `datasheet_ability`, `datasheet_bodyguard_group(_datasheet/_keyword)`, `wargear_item`, `wargear_item_profile`, `wargear_item_profile_wargear_ability`, `wargear_ability`, `base_miniature_loadout(_wargear_option)`, `wargear_option`, `loadout_choice_set`, `loadout_choice`, `loadout_choice_wargear_item`, `limited_wargear_choice_set`, `limited_wargear_choice`, `limited_wargear_choice_wargear_item`, `wargear_limit` |
 | Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement`, `stratagem`, `detachment_unique_keyword` |
 | Army Builder game-size limits (`getBattleSizes`) | `battle_size` |
+| Allied units + caps (`getAlliedUnitsForFaction`, `getAlliedLimitsForFaction`) | `faction_keyword_allied_faction`, `allied_faction_datasheet`, `allied_faction_required_detachment`, `allied_faction_keyword`, `allied_faction_points_limit`, `battle_size`, `keyword`, `datasheet`, `publication` |
+| Saved-roster import (`getSavedDbRosters`, `getDbRosterDetail`) | `roster`, `roster_detachment`, `roster_unit`, `roster_unit_miniature`, `roster_unit_wargear_option`, `roster_unit_miniature_wargear_option`, `roster_unit_miniature_enhancement`, `roster_attached_unit(_roster_unit)`, plus joins to `datasheet`, `miniature`, `wargear_option`, `wargear_item`, `enhancement`, `detachment`, `faction_keyword`, `battle_size` |
 | Dashboard stats (`getDbStats`) | `metadata` + row counts of the headline tables |
 
 Meta-factions (umbrella keywords that span several sub-faction keywords) are expanded
 in code via `META_FACTION_MAP` in `db.ts`, then widened by following datasheets that
 carry both a parent and child faction keyword.
 
-Notably **unused so far**: the missions family (other than `battle_size`), `allied_faction*`, and `faq`. All
+Notably **unused so far**: the missions family (other than `battle_size`) and `faq`. Both
 candidates for future features — see [`TODO.md`](./TODO.md) for the integration
-assessment of each. (`invulnerable_save`, `datasheet_damage`, `loadout_choice*` swap options, and `wargear_limit*` are now queried and integrated inside `getUnitsByFaction` and the Army Builder rosters/validations.)
+assessment of each. (`invulnerable_save`, `datasheet_damage`, `loadout_choice*` swap options, `wargear_limit*`, `allied_faction*`, and the `roster*` family are now queried and integrated across `getUnitsByFaction` and the Army Builder catalog/validation/import.)
+
+**Schema versions vary between companion-app releases.** Example: in newer DBs
+`wargear_limit` carries `datasheetId`/`wargearItemId`/`limitCount`/`ratioModelCount`;
+in older ones it's keyed by `limitedWargearChoiceSetId` with `modelCount`/`choiceLimit`
+columns instead. `db.ts` probes the live schema with `PRAGMA table_info` before
+querying version-sensitive tables and degrades gracefully (skips the feature) on a
+mismatch rather than failing the load.
 
 ## Useful query shapes
 

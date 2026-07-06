@@ -6,7 +6,7 @@ The **Faction Browser** view compiles intelligence profiles for a single selecte
 
 ## 📸 Component Reference
 
-- **React Component:** [FactionBrowser.tsx](file:///Users/georgestephanis/code/tactical-cognis/src/components/FactionBrowser.tsx)
+- **React Component:** [FactionBrowser.tsx](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/components/FactionBrowser.tsx)
 - **Styling Hooks:** Utilizes standard sub-navigation classes (`.nav-tabs`, `.tab-btn`), filter control badges, and custom print rules (`.print-cards-grid`, `.id1-datacard`).
 
 ---

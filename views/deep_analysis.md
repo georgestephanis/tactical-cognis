@@ -6,7 +6,7 @@ The **Deep Analysis** view is a global sandbox workspace. It allows users to run
 
 ## 📸 Component Reference
 
-- **React Component:** [DeepAnalysis.tsx](file:///Users/georgestephanis/code/tactical-cognis/src/components/DeepAnalysis.tsx)
+- **React Component:** [DeepAnalysis.tsx](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/components/DeepAnalysis.tsx)
 - **Styling Hooks:** Uses standard dashboard panels, sub-tab navigators (`.nav-tabs`, `.tab-btn`), inline grid form controls (`.input-group`, `.input-control`), and custom flexbar elements for visual data charts (`.custom-bar-chart`, `.chart-bar-fill`).
 
 ---
@@ -23,7 +23,7 @@ Users choose between three primary analysis workspaces:
 - **Synergy & Transport Planner (`synergy`):** Plans troop transport details. The user selects a vehicle with the `TRANSPORT` keyword. The component reads transport rules from the database (e.g., `"This vehicle has a transport capacity of 12 models"`), parses the integer limit, and checks the occupancy of embarked infantry.
 
 ### 2. Calculations & Dice Parsing
-- Uses `calculateExpectedDamage(mathInput, target)` (defined in [src/utils/mathhammer.ts](file:///Users/georgestephanis/code/tactical-cognis/src/utils/mathhammer.ts)).
+- Uses `calculateExpectedDamage(mathInput, target)` (defined in [src/utils/mathhammer.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/mathhammer.ts)).
 - Parses variable dice expressions (e.g. `'D6'`, `'2D6+3'`, `'D3'`) using mathematical averages (e.g., D6 = 3.5, D3 = 2, 2D6+3 = 10) to support fractional expected damage calculations.
 - Evaluates keywords: **Blast** increases attacks based on target unit size; **Lethal Hits** skip wound rolls; **Devastating Wounds** skip saving throws; **Sustained Hits** award bonus hits on roll checks of 6; **Twin-Linked** permits full wound re-rolls.
 - Evaluates transport occupancy: If embarked models carry `MEGA ARMOUR` or `TERMINATOR` keywords, they count as 2 models toward the vehicle's capacity.

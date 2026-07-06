@@ -6,8 +6,8 @@ The **Unit Details Modal** is a full-screen overlay component that provides deep
 
 ## 📸 Component Reference
 
-- **React Component:** [UnitDetails.tsx](file:///Users/georgestephanis/code/tactical-cognis/src/components/UnitDetails.tsx)
-- **Styling Hooks:** Defined in [src/index.css](file:///Users/georgestephanis/code/tactical-cognis/src/index.css) (classes: `.overlay`, `.detail-modal`, `.datasheet-card-render`, `.datasheet-header-banner`, `.datasheet-stats-row`, `.datasheet-stat-cell`, `.datasheet-weapon-table`, `.datasheet-ability-block`, `.stat-pill`).
+- **React Component:** [UnitDetails.tsx](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/components/UnitDetails.tsx)
+- **Styling Hooks:** Defined in [src/index.css](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/index.css) (classes: `.overlay`, `.detail-modal`, `.datasheet-card-render`, `.datasheet-header-banner`, `.datasheet-stats-row`, `.datasheet-stat-cell`, `.datasheet-weapon-table`, `.datasheet-ability-block`, `.stat-pill`).
 
 ---
 
@@ -18,7 +18,7 @@ The **Unit Details Modal** is a full-screen overlay component that provides deep
 - **Tactical Simulator Mode (`tactical`):** An interactive playground. Compiles all weapons from the unit into a selector dropdown. The user selects a weapon profile and applies custom battle modifiers (re-rolls, plus-to-hit/wound adjustments) to run combat math.
 
 ### 2. Mathhammer Calculations
-When in Simulator mode, the selected weapon profile is run against five standardized enemy defensive presets (`TARGET_PRESETS` in [src/utils/mathhammer.ts](file:///Users/georgestephanis/code/tactical-cognis/src/utils/mathhammer.ts)):
+When in Simulator mode, the selected weapon profile is run against five standardized enemy defensive presets (`TARGET_PRESETS` in [src/utils/mathhammer.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/mathhammer.ts)):
 - **GEQ (Guard Equivalent):** T3, 5+ Save, 1 Wound, unit size 10 (Light Infantry Equivalent)
 - **MEQ (Space Marine Equivalent):** T4, 3+ Save, 2 Wounds, unit size 5 (Medium Infantry Equivalent)
 - **TEQ (Terminator Equivalent):** T5, 2+/4++ Save, 3 Wounds, unit size 5 (Heavy Infantry Equivalent)

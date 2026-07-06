@@ -48,8 +48,8 @@ Click on any view below to read its technical design, style sheets, rendering me
    - *Keys:* BS/WS roll calculators, defensive preset comparisons (GEQ, MEQ, TEQ, VEH), wounds/points efficiency matrices.
 
 5. **[Army Builder](./army_builder.md)**
-   - *Purpose:* Roster construction workspace. Select points sizes, add units, attach leaders to bodyguards, allocate enhancements, and perform rule validation.
-   - *Keys:* LocalStorage storage, text import parser (Official App export format), PDF printable layouts.
+   - *Purpose:* Roster construction workspace. Select points sizes, add units (including allied units), attach leaders to bodyguards, split Combat Squads, allocate enhancements, and perform rule validation.
+   - *Keys:* LocalStorage storage, saved-roster import straight from the uploaded companion-app database, text import parser (Official App export format), PDF printable layouts.
 
 6. **[Deep Analysis (Playground & Matrix)](./deep_analysis.md)**
    - *Purpose:* Global sandbox for comparing units across different factions. Includes custom Mathhammer weapons, points efficiency arrays, and troop transport planners.
@@ -59,7 +59,7 @@ Click on any view below to read its technical design, style sheets, rendering me
 
 ## How Views Inter-Link
 
-- **State synchronization:** The top-level state is owned by [App.tsx](file:///Users/georgestephanis/code/tactical-cognis/src/App.tsx). Sub-views invoke callbacks such as `onSelectFaction` or `onSelectUnit` to adjust this state.
+- **State synchronization:** The top-level state is owned by [App.tsx](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/App.tsx). Sub-views invoke callbacks such as `onSelectFaction` or `onSelectUnit` to adjust this state.
 - **Deep Linking:** The URL query parameters `?view=`, `?faction=`, and `?unit=` are parsed dynamically to route the user directly to Factions, specific Units, or analytical workspaces upon page load.
 
 ---

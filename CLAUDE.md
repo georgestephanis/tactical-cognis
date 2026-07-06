@@ -28,7 +28,7 @@ npm test                       # Run zero-dependency mathhammer unit tests
 
 ## Commands & Testing
 
-Unit tests are located in [tests/mathhammer.test.ts](file:///Users/georgestephanis/code/tactical-cognis/tests/mathhammer.test.ts). Execute them with:
+Unit tests are located in [tests/mathhammer.test.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/tests/mathhammer.test.ts). Execute them with:
 
 ```bash
 npm test
@@ -41,10 +41,10 @@ Prefer this pattern (plain asserts, zero-dependency, run via `tsx`) if you add c
 ## Architecture
 
 - `src/App.tsx` — top-level router. No react-router; view state is synced to `?view=&faction=&unit=` query params by hand via `history.pushState`/`popstate`.
-- `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers. The database schema is documented in `DB.md` and the data layer details are mapped in [docs/data_architecture.md](./docs/data_architecture.md).
+- `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers — including allied-unit helpers (`getAlliedUnitsForFaction`/`getAlliedLimitsForFaction`) and saved-roster import helpers (`getSavedDbRosters`/`getDbRosterDetail`, which read the user's own `roster*` tables). Companion-app schema versions vary, so probe version-sensitive tables with `PRAGMA table_info` and degrade gracefully rather than letting one missing column fail a whole load (see the `wargear_limit` handling). The database schema is documented in `DB.md` and the data layer details are mapped in [docs/data_architecture.md](./docs/data_architecture.md).
 - `src/utils/dataMapper.ts` — maps raw DB rows into the `MergedUnit`/`MergedFaction` shapes the UI consumes.
 - `src/utils/mathhammer.ts` — pure combat-math engine (hit/wound/save/damage expectation, devastating wounds, FNP, AP reduction, etc.), no DB or React dependency. The mathematical equations are documented in [docs/mathhammer_engine.md](./docs/mathhammer_engine.md).
-- `src/components/` — one component per view (`Dashboard`, `FactionBrowser`, `UnitDetails`, `ArmyBuilder`, `DeepAnalysis`) plus `DatabaseUploadView` for the no-DB fallback. Detailed view maps are in [views/README.md](./views/README.md).
+- `src/components/` — one component per view (`Dashboard`, `FactionBrowser`, `UnitDetails`, `ArmyBuilder`, `DeepAnalysis`) plus `DatabaseUploadView` for the no-DB fallback and `RulesText`, the shared safe renderer for the DB's inline rules markup (DOMParser → React nodes, no `dangerouslySetInnerHTML`). Detailed view maps are in [views/README.md](./views/README.md).
 - This is a browser-only app — no Electron, no desktop shell. `scripts/find-db.cjs` (`npm run db:find`) is a plain Node script for local dev convenience only; it never runs as part of the build.
 
 ## Gotchas

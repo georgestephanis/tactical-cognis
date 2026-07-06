@@ -1,6 +1,6 @@
 # Mathhammer Combat Simulation Engine
 
-The **Mathhammer Combat Simulation Engine** is the analytical core of the Tactical Cognis application. It provides pure mathematical probability models for simulating combat sequences in Warhammer 40k. It operates independently of the database schema and React rendering cycles, located in [src/utils/mathhammer.ts](file:///Users/georgestephanis/code/tactical-cognis/src/utils/mathhammer.ts).
+The **Mathhammer Combat Simulation Engine** is the analytical core of the Tactical Cognis application. It provides pure mathematical probability models for simulating combat sequences in Warhammer 40k. It operates independently of the database schema and React rendering cycles, located in [src/utils/mathhammer.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/mathhammer.ts).
 
 ---
 
@@ -115,3 +115,15 @@ Located in `parseDiceAverage` and `getDiceDistribution`:
 - **Averages:** The expected value of a variable $D_n$ die is:
   $$E[D_n] = \frac{n + 1}{2}$$
 - **Distribution Mapping:** For complex expressions like `2D6+3`, the engine uses standard convolution mappings (generating combinations via mapping arrays) to return the exact probability density function for every sum outcome value, which is then used to compute non-linear damage reduction caps accurately.
+
+---
+
+## ✅ Unit Test Coverage
+
+The engine has a zero-dependency test suite at [tests/mathhammer.test.ts](../tests/mathhammer.test.ts) (plain `assert` calls, run via `tsx`):
+
+```bash
+npm test
+```
+
+It covers dice-expression parsing and probability distributions, Feel No Pain (binomial), hit/wound modifiers (including Transhuman-style caps), Benefit of Cover, AP and saving-throw logic, and Devastating Wounds. Prefer extending this file (or cloning its pattern) when adding math features.

@@ -21,6 +21,8 @@ The app reads a `40k.sqlite` file with the companion-app schema (`datasheet`, `m
 2. **Manual extraction** — see [manual-db-sqlite.md](./manual-db-sqlite.md) for pulling `db.sqlite` straight out of the official WH40k companion app by hand.
 3. **In-browser upload** — run the app with no database present and it'll prompt you to upload one.
 
+If the database contains your own saved army lists from the companion app (the `roster*` tables), the Army Builder's Import modal lists them and can pull them in directly — exact units, model counts, wargear, enhancements, and leader attachments included.
+
 ## Building
 
 ```bash
