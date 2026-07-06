@@ -42,3 +42,6 @@ This document outlines the assessment and plan for leveraging unused database ta
 * **`loadout_choice*` & `wargear_limit*`** ✅ Custom wargear swaps and squad limits mapped and validated in the builder. (`wargear_limit` is schema-probed via `PRAGMA table_info` — older DB versions without `datasheetId` skip limits gracefully.)
 * **`allied_faction*`** ✅ Allies in ArmyBuilder: "Allies" catalog category via `getAlliedUnitsForFaction`, detachment gating via `allied_faction_required_detachment`, and points caps validated via `getAlliedLimitsForFaction`.
 * **`roster*`** ✅ Saved-roster import: the Import modal lists army lists found in the uploaded companion-app DB (`getSavedDbRosters`/`getDbRosterDetail`) and imports them with exact units, model counts, wargear, enhancements, warlord, allies, and leader attachments.
+* **`enhancement` schema columns & `enhancement_*` constraints** ✅ Mapped `isIncludedInEnhancementLimit`, `isEquipableByNonCharacterUnit`, `duplicateLimit` columns along with keyword and wargear constraint tables to validate enhancement eligibility.
+* **`datasheet_points_step`** ✅ Mapped stepped pricing for duplicate units (e.g. Stompa, Big Mek Dakkarig) to dynamically adjust point costs for duplicate units.
+

@@ -462,7 +462,7 @@ function generateRosterText(
     ? detachmentSlugs.map(slug => factionData.detachments.find(d => d.slug === slug)?.name || slug)
     : detachmentSlugs;
   const detachmentStr = detachmentNames.join(', ') || 'No Detachments';
-  const totalPoints = roster.reduce((sum, u) => sum + u.points + (u.enhancementPoints || 0), 0);
+  const totalPoints = roster.reduce((sum, u) => sum + getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0), 0);
 
   if (format === 'standard') {
     const lines: string[] = [];
@@ -479,7 +479,8 @@ function generateRosterText(
         const warlordTag = u.isWarlord ? ', Warlord' : '';
         const wargear = getRosterUnitWargear(u, factionData);
         const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
-        lines.push(`* **${u.name}** (${u.points + (u.enhancementPoints || 0)} points)${warlordTag}${wargearSuffix}`);
+        const actualPoints = getUnitActualPoints(u, roster, factionData);
+        lines.push(`* **${u.name}** (${actualPoints + (u.enhancementPoints || 0)} points)${warlordTag}${wargearSuffix}`);
         if (u.enhancementName) {
           lines.push(`  - Enhancement: ${u.enhancementName}`);
         }
@@ -525,8 +526,8 @@ function generateRosterText(
       const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
       const wargear = getRosterUnitWargear(u, factionData);
       const wargearSuffix = wargear.length > 0 ? ` (${wargear.join(', ')})` : '';
-      const enhSuffix = u.enhancementName ? ` - Enhancement: ${u.enhancementName}` : '';
-      lines.push(`UNIT ${idx + 1}: ${u.name}${splitTag}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${u.points + (u.enhancementPoints || 0)} pts]`);
+      const actualPoints = getUnitActualPoints(u, roster, factionData);
+      lines.push(`UNIT ${idx + 1}: ${u.name}${splitTag}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${actualPoints + (u.enhancementPoints || 0)} pts]`);
     });
 
     return lines.join('\n');
@@ -540,7 +541,8 @@ function generateRosterText(
   roster.forEach(u => {
     const warlordSuffix = u.isWarlord ? ', Warlord' : '';
     const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
-    lines.push(`• ${u.name}${splitTag}${warlordSuffix} (${u.points + (u.enhancementPoints || 0)} pts)`);
+    const actualPoints = getUnitActualPoints(u, roster, factionData);
+    lines.push(`• ${u.name}${splitTag}${warlordSuffix} (${actualPoints + (u.enhancementPoints || 0)} pts)`);
     if (u.enhancementName) {
       lines.push(`  • Enhancement: ${u.enhancementName}`);
     }
@@ -634,6 +636,464 @@ function canUnitSplit(
   if (transportSplitUnits.some(u => normName.includes(u))) return true;
 
   return false;
+}
+
+/**
+ * Checks if a unit satisfies keyword requirements/exclusions for a detachment upgrade/enhancement.
+ */
+function isUnitEligibleForEnhancement(unitKeywords: string[], enhancement: AppEnhancement): boolean {
+  const normKeywords = unitKeywords.map(k => k.toLowerCase());
+
+  // 1. Excluded keywords check: unit must NOT have any excluded keywords
+  if (enhancement.excludedKeywords && enhancement.excludedKeywords.length > 0) {
+    const hasExcluded = enhancement.excludedKeywords.some(ek =>
+      normKeywords.includes(ek.toLowerCase())
+    );
+    if (hasExcluded) return false;
+  }
+
+  // 2. Required keyword groups check: unit must satisfy AT LEAST ONE group (OR between groups, AND within group)
+  if (enhancement.requiredKeywordGroups && enhancement.requiredKeywordGroups.length > 0) {
+    const satisfiesAnyGroup = enhancement.requiredKeywordGroups.some(group => {
+      return group.every(rk => normKeywords.includes(rk.toLowerCase()));
+    });
+    if (!satisfiesAnyGroup) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Validates whether a character can attach to a bodyguard squad under leader/support limits.
+ */
+function canAttachCharacterToSquad(
+  character: RosterUnit,
+  bodyguard: RosterUnit,
+  roster: RosterUnit[],
+  factionData: MergedFaction | null
+): { allowed: boolean; reason?: string } {
+  if (!factionData) return { allowed: true };
+
+  const charCatalog = factionData.units.find(u => u.slug === character.unitSlug) || (factionData.alliedUnits && factionData.alliedUnits.find(u => u.slug === character.unitSlug));
+  if (!charCatalog) return { allowed: true };
+
+  const bgCatalog = factionData.units.find(u => u.slug === bodyguard.unitSlug) || (factionData.alliedUnits && factionData.alliedUnits.find(u => u.slug === bodyguard.unitSlug));
+  if (!bgCatalog) return { allowed: true };
+
+  // Classify current character
+  const isSupport = charCatalog.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
+  const isWarboss = charCatalog.appDatasheet?.models?.[0]?.keywords?.some(k => k.toLowerCase() === 'warboss') || false;
+
+  // Get all characters currently attached to this bodyguard
+  const attached = roster.filter(u => u.attachedToId === bodyguard.id && u.id !== character.id);
+  
+  // Calculate attached counts
+  let numLeaders = 0;
+  let numSupports = 0;
+  let hasAttachedWarboss = false;
+
+  attached.forEach(c => {
+    const cCat = factionData.units.find(u => u.slug === c.unitSlug) || (factionData.alliedUnits && factionData.alliedUnits.find(u => u.slug === c.unitSlug));
+    const cIsSupport = cCat?.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
+    const cIsWarboss = cCat?.appDatasheet?.models?.[0]?.keywords?.some(k => k.toLowerCase() === 'warboss') || false;
+    
+    if (cIsSupport) {
+      numSupports++;
+    } else {
+      numLeaders++;
+      if (cIsWarboss) {
+        hasAttachedWarboss = true;
+      }
+    }
+  });
+
+  if (isSupport) {
+    if (numSupports >= 1) {
+      return { allowed: false, reason: 'Support slot full' };
+    }
+  } else {
+    // Determine max leaders allowed for this bodyguard squad
+    let maxLeaders = 1;
+    const isBoyz = bodyguard.name.toLowerCase() === 'boyz';
+    
+    if (isBoyz && bodyguard.modelsCount === 20) {
+      if (isWarboss || hasAttachedWarboss) {
+        maxLeaders = 2;
+      }
+    }
+
+    if (numLeaders >= maxLeaders) {
+      if (isBoyz && bodyguard.modelsCount === 20 && !isWarboss && !hasAttachedWarboss) {
+        return { allowed: false, reason: 'Requires Warboss for 2nd Leader' };
+      }
+      return { allowed: false, reason: 'Leader slot full' };
+    }
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * Calculates the actual points of a roster unit, including any stepped pricing based on duplicate units.
+ */
+function getUnitActualPoints(unit: RosterUnit, roster: RosterUnit[], factionData: MergedFaction | null): number {
+  if (!factionData) return unit.points;
+
+  // Find original merged unit definition to get pointsSteps
+  const matchedCatalog = factionData.units.find(u => u.slug === unit.unitSlug) || (factionData.alliedUnits && factionData.alliedUnits.find(u => u.slug === unit.unitSlug));
+  const steps = matchedCatalog?.appDatasheet?.pointsSteps;
+  if (!steps || steps.length === 0) {
+    return unit.points;
+  }
+
+  // Find the index of this unit among other copies of the same unit in the roster
+  const sameUnits = roster.filter(u => u.unitSlug === unit.unitSlug);
+  const myIndex = sameUnits.findIndex(u => u.id === unit.id);
+  if (myIndex === -1) return unit.points;
+
+  // Apply any stepped points if myIndex >= stepAt
+  let extraPoints = 0;
+  steps.forEach(step => {
+    if (myIndex + 1 >= step.stepAt) {
+      extraPoints += step.stepPoints;
+    }
+  });
+
+  return unit.points + extraPoints;
+}
+
+interface PrintableUnitWrapper {
+  unit: RosterUnit;
+  indent: boolean;
+  roleLabel?: string;
+  count: number;
+  pointsRange: string;
+}
+
+/**
+ * Generates a stable serialization key representing a unit's configuration.
+ */
+function serializeRosterUnit(u: RosterUnit, roster: RosterUnit[], ignoreAttachmentInfo: boolean = false): string {
+  let attachmentKey = 'no-attach';
+  
+  if (!ignoreAttachmentInfo) {
+    if (u.isCharacter) {
+      if (u.attachedToId) {
+        const bodyguard = roster.find(r => r.id === u.attachedToId);
+        if (bodyguard) {
+          attachmentKey = `leads::${serializeRosterUnit(bodyguard, roster, true)}`;
+        }
+      }
+    } else {
+      const attached = roster.filter(c => c.attachedToId === u.id);
+      if (attached.length > 0) {
+        const attachedKeys = attached.map(c => serializeRosterUnit(c, roster, true)).sort();
+        attachmentKey = `ledby::${attachedKeys.join('&&')}`;
+      }
+    }
+  }
+
+  const parts = [
+    u.unitSlug,
+    u.modelsCount.toString(),
+    u.selectedCostIndex.toString(),
+    u.splitSquad ? 'split' : 'no-split',
+    u.enhancementName || 'no-enh',
+    u.isWarlord ? 'warlord' : 'no-warlord',
+    attachmentKey,
+    JSON.stringify(u.wargearCounts || {}),
+    JSON.stringify(u.selectedWargearChoices || [])
+  ];
+  return parts.join('||');
+}
+
+/**
+ * Groups and clusters leader characters with their bodyguard squads, returning a structured list for printing.
+ */
+function getPrintableRoster(
+  roster: RosterUnit[],
+  factionData: MergedFaction | null,
+  collapseDuplicates: boolean
+): PrintableUnitWrapper[] {
+  
+  if (!collapseDuplicates) {
+    const result: PrintableUnitWrapper[] = [];
+    const handledIds = new Set<string>();
+
+    const bodyguards = roster.filter(u => !u.isCharacter);
+    bodyguards.forEach(bg => {
+      const attached = roster.filter(c => c.attachedToId === bg.id);
+      if (attached.length > 0) {
+        const leaders: RosterUnit[] = [];
+        const supports: RosterUnit[] = [];
+        attached.forEach(c => {
+          const cat = factionData?.units.find(u => u.slug === c.unitSlug) || (factionData?.alliedUnits && factionData.alliedUnits.find(u => u.slug === c.unitSlug));
+          const isSupport = cat?.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
+          if (isSupport) {
+            supports.push(c);
+          } else {
+            leaders.push(c);
+          }
+        });
+        leaders.forEach(l => {
+          result.push({
+            unit: l,
+            indent: false,
+            roleLabel: 'Attached Leader',
+            count: 1,
+            pointsRange: `${getUnitActualPoints(l, roster, factionData) + (l.enhancementPoints || 0)}`
+          });
+          handledIds.add(l.id);
+        });
+        result.push({
+          unit: bg,
+          indent: true,
+          roleLabel: 'Bodyguard Squad',
+          count: 1,
+          pointsRange: `${getUnitActualPoints(bg, roster, factionData) + (bg.enhancementPoints || 0)}`
+        });
+        handledIds.add(bg.id);
+        supports.forEach(s => {
+          result.push({
+            unit: s,
+            indent: true,
+            roleLabel: 'Support Character',
+            count: 1,
+            pointsRange: `${getUnitActualPoints(s, roster, factionData) + (s.enhancementPoints || 0)}`
+          });
+          handledIds.add(s.id);
+        });
+      }
+    });
+
+    roster.forEach(u => {
+      if (!handledIds.has(u.id)) {
+        result.push({
+          unit: u,
+          indent: false,
+          roleLabel: u.isCharacter ? 'Independent Character' : 'Independent Squad',
+          count: 1,
+          pointsRange: `${getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0)}`
+        });
+        handledIds.add(u.id);
+      }
+    });
+
+    return result;
+  }
+
+  // Collapsing Identical Units!
+  const keyMap = new Map<string, RosterUnit[]>();
+  roster.forEach(u => {
+    const key = serializeRosterUnit(u, roster);
+    if (!keyMap.has(key)) keyMap.set(key, []);
+    keyMap.get(key)!.push(u);
+  });
+
+  const collapsedUnits: {
+    id: string;
+    unit: RosterUnit;
+    count: number;
+    pointsRange: string;
+  }[] = [];
+
+  keyMap.forEach((group, key) => {
+    const rep = { ...group[0] };
+    const count = group.length;
+
+    const ptsList = group.map(u => getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0));
+    const minPts = Math.min(...ptsList);
+    const maxPts = Math.max(...ptsList);
+    const pointsRange = minPts === maxPts ? `${minPts}` : `${minPts}-${maxPts}`;
+
+    if (rep.attachedToId) {
+      const bodyguard = roster.find(r => r.id === rep.attachedToId);
+      if (bodyguard) {
+        rep.attachedToId = serializeRosterUnit(bodyguard, roster);
+      }
+    }
+
+    rep.id = key;
+
+    collapsedUnits.push({
+      id: key,
+      unit: rep,
+      count,
+      pointsRange
+    });
+  });
+
+  const result: PrintableUnitWrapper[] = [];
+  const handledKeys = new Set<string>();
+
+  const bodyguards = collapsedUnits.filter(cu => !cu.unit.isCharacter);
+  bodyguards.forEach(bg => {
+    const attached = collapsedUnits.filter(cu => cu.unit.attachedToId === bg.id);
+    if (attached.length > 0) {
+      const leaders: typeof collapsedUnits[] = [];
+      const supports: typeof collapsedUnits[] = [];
+
+      attached.forEach(cu => {
+        const cat = factionData?.units.find(u => u.slug === cu.unit.unitSlug) || (factionData?.alliedUnits && factionData.alliedUnits.find(u => u.slug === cu.unit.unitSlug));
+        const isSupport = cat?.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
+        if (isSupport) {
+          supports.push(cu);
+        } else {
+          leaders.push(cu);
+        }
+      });
+
+      leaders.forEach(l => {
+        result.push({
+          unit: l.unit,
+          indent: false,
+          roleLabel: 'Attached Leader',
+          count: l.count,
+          pointsRange: l.pointsRange
+        });
+        handledKeys.add(l.id);
+      });
+
+      result.push({
+        unit: bg.unit,
+        indent: true,
+        roleLabel: 'Bodyguard Squad',
+        count: bg.count,
+        pointsRange: bg.pointsRange
+      });
+      handledKeys.add(bg.id);
+
+      supports.forEach(s => {
+        result.push({
+          unit: s.unit,
+          indent: true,
+          roleLabel: 'Support Character',
+          count: s.count,
+          pointsRange: s.pointsRange
+        });
+        handledKeys.add(s.id);
+      });
+    }
+  });
+
+  collapsedUnits.forEach(cu => {
+    if (!handledKeys.has(cu.id)) {
+      result.push({
+        unit: cu.unit,
+        indent: false,
+        roleLabel: cu.unit.isCharacter ? 'Independent Character' : 'Independent Squad',
+        count: cu.count,
+        pointsRange: cu.pointsRange
+      });
+      handledKeys.add(cu.id);
+    }
+  });
+
+  return result;
+}
+
+interface PrintableCardWrapper {
+  id: string;
+  unit: RosterUnit & { virtualName?: string; virtualModelsCount?: number };
+  count: number;
+  pointsDisplay: string;
+}
+
+/**
+ * Returns a list of card-compatible wrappers, deduping identical cards if collapseDuplicates is true.
+ */
+function getPrintableCardsRoster(
+  roster: RosterUnit[],
+  factionData: MergedFaction | null,
+  collapseDuplicates: boolean
+): PrintableCardWrapper[] {
+  const rawCards = roster.flatMap(unit => {
+    if (unit.splitSquad) {
+      return [
+        { ...unit, id: `${unit.id}-squad-a`, virtualName: `${unit.name} (Squad A)`, virtualModelsCount: 5, virtualPoints: getUnitActualPoints(unit, roster, factionData) / 2 },
+        { ...unit, id: `${unit.id}-squad-b`, virtualName: `${unit.name} (Squad B)`, virtualModelsCount: 5, virtualPoints: getUnitActualPoints(unit, roster, factionData) / 2 }
+      ];
+    }
+    return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount, virtualPoints: getUnitActualPoints(unit, roster, factionData) + (unit.enhancementPoints || 0) }];
+  });
+
+  if (!collapseDuplicates) {
+    return rawCards.map(rc => ({
+      id: rc.id,
+      unit: rc,
+      count: 1,
+      pointsDisplay: rc.splitSquad ? `${rc.virtualPoints} pts (Split)` : `${rc.virtualPoints} pts`
+    }));
+  }
+
+  const serializeRawCard = (c: any, ignoreAttachment: boolean = false): string => {
+    let attachmentKey = 'no-attach';
+    if (!ignoreAttachment) {
+      if (c.isCharacter) {
+        if (c.attachedToId) {
+          const bodyguard = roster.find(r => r.id === c.attachedToId);
+          if (bodyguard) {
+            attachmentKey = `leads::${serializeRosterUnit(bodyguard, roster, true)}`;
+          }
+        }
+      } else {
+        const attached = roster.filter(char => char.attachedToId === c.id);
+        if (attached.length > 0) {
+          const attachedKeys = attached.map(char => serializeRosterUnit(char, roster, true)).sort();
+          attachmentKey = `ledby::${attachedKeys.join('&&')}`;
+        }
+      }
+    }
+
+    const parts = [
+      c.unitSlug,
+      c.virtualModelsCount.toString(),
+      c.enhancementName || 'no-enh',
+      c.isWarlord ? 'warlord' : 'no-warlord',
+      attachmentKey,
+      JSON.stringify(c.wargearCounts || {}),
+      JSON.stringify(c.selectedWargearChoices || [])
+    ];
+    return parts.join('||');
+  };
+
+  const keyMap = new Map<string, typeof rawCards>();
+  rawCards.forEach(rc => {
+    const key = serializeRawCard(rc);
+    if (!keyMap.has(key)) keyMap.set(key, []);
+    keyMap.get(key)!.push(rc);
+  });
+
+  const result: PrintableCardWrapper[] = [];
+  keyMap.forEach((group, key) => {
+    const rep = { ...group[0] };
+    const count = group.length;
+
+    const ptsList = group.map(g => g.virtualPoints);
+    const minPts = Math.min(...ptsList);
+    const maxPts = Math.max(...ptsList);
+    const pointsDisplay = minPts === maxPts ? `${minPts} pts` : `${minPts}-${maxPts} pts`;
+
+    if (rep.attachedToId) {
+      const bodyguard = roster.find(r => r.id === rep.attachedToId);
+      if (bodyguard) {
+        rep.attachedToId = serializeRosterUnit(bodyguard, roster);
+      }
+    }
+
+    if (count > 1) {
+      rep.virtualName = `${rep.name} (x${count})`;
+    }
+
+    result.push({
+      id: key,
+      unit: rep,
+      count,
+      pointsDisplay
+    });
+  });
+
+  return result;
 }
 
 /**
@@ -825,6 +1285,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const [listNameToSave, setListNameToSave] = useState<string>('');
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState<boolean>(false);
   const [printLayout, setPrintLayout] = useState<'tabular' | 'datacards'>('tabular');
+  const [collapseDuplicates, setCollapseDuplicates] = useState<boolean>(false);
 
   // Import states
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
@@ -1106,11 +1567,30 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     if (parsed.rosterName) {
       setCurrentListName(parsed.rosterName);
     }
-    if (parsed.pointLimit) {
-      setPointLimit(parsed.pointLimit);
-      setCustomLimitInput(parsed.pointLimit.toString());
-      setIsCustomLimit(![1000, 2000, 3000].includes(parsed.pointLimit));
+    let targetLimit = parsed.pointLimit;
+    if (!targetLimit || targetLimit <= 0) {
+      const importedTotalPoints = newRosterUnits.reduce((sum, u) => sum + getUnitActualPoints(u, newRosterUnits, faction) + (u.enhancementPoints || 0), 0);
+      targetLimit = importedTotalPoints;
     }
+
+    if (targetLimit > 0) {
+      if (battleSizes.length > 0) {
+        const matchedSize = battleSizes.find(b => b.pointsLimit >= targetLimit);
+        if (matchedSize) {
+          targetLimit = matchedSize.pointsLimit;
+        } else {
+          targetLimit = Math.ceil(targetLimit / 1000) * 1000;
+        }
+      } else {
+        targetLimit = Math.ceil(targetLimit / 1000) * 1000;
+      }
+    } else {
+      targetLimit = 2000;
+    }
+
+    setPointLimit(targetLimit);
+    setCustomLimitInput(targetLimit.toString());
+    setIsCustomLimit(![1000, 2000, 3000].includes(targetLimit));
 
     if (warnings.length > 0) {
       alert(`Import complete with warnings:\n\n${warnings.join('\n')}`);
@@ -1373,7 +1853,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // Calculate points total
   const calculateTotalPoints = (): number => {
     return roster.reduce((sum, u) => {
-      return sum + u.points + (u.enhancementPoints || 0);
+      return sum + getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0);
     }, 0);
   };
 
@@ -1469,27 +1949,59 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     });
 
     // 4. Enhancements checks
-    const enhancedUnits = roster.filter(u => u.enhancementName);
-    if (enhancedUnits.length > enhancementLimit) {
-      validationErrors.push(`Exceeded enhancement limit: selected ${enhancedUnits.length} enhancements (Max is ${enhancementLimit}${applicableBattleSize ? ` for ${applicableBattleSize.name}` : ''}).`);
+    const enhancedUnitsForLimit = roster.filter(u => {
+      if (!u.enhancementName) return false;
+      const matchedEnh = selectedDetachments
+        .flatMap(d => d.enhancements)
+        .find(e => e.name === u.enhancementName);
+      return matchedEnh ? matchedEnh.isIncludedInEnhancementLimit !== false : true;
+    });
+    if (enhancedUnitsForLimit.length > enhancementLimit) {
+      validationErrors.push(`Exceeded enhancement limit: selected ${enhancedUnitsForLimit.length} enhancements counting towards the limit (Max is ${enhancementLimit}${applicableBattleSize ? ` for ${applicableBattleSize.name}` : ''}).`);
     }
 
-    const seenEnhancements = new Set<string>();
+    const enhancementCounts: Record<string, number> = {};
+    const enhancedUnits = roster.filter(u => u.enhancementName);
     enhancedUnits.forEach(u => {
       if (u.enhancementName) {
-        if (seenEnhancements.has(u.enhancementName)) {
-          validationErrors.push(`Duplicate enhancement selected: "${u.enhancementName}" is assigned to multiple units.`);
-        }
-        seenEnhancements.add(u.enhancementName);
+        enhancementCounts[u.enhancementName] = (enhancementCounts[u.enhancementName] || 0) + 1;
 
-        // Cannot be Warlord enhancement restriction (search every selected detachment)
-        if (u.isWarlord) {
-          const matchedEnh = selectedDetachments
-            .flatMap(d => d.enhancements)
-            .find(e => e.name === u.enhancementName);
-          if (matchedEnh?.cannotBeWarlord) {
+        const matchedEnh = selectedDetachments
+          .flatMap(d => d.enhancements)
+          .find(e => e.name === u.enhancementName);
+
+        if (matchedEnh) {
+          // Cannot be Warlord enhancement restriction
+          if (u.isWarlord && matchedEnh.cannotBeWarlord) {
             validationErrors.push(`Invalid Enhancement: "${u.enhancementName}" cannot be given to your Warlord.`);
           }
+
+          // Check keywords on this unit
+          const keywords = findCatalogUnit(u.unitSlug)?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+          const isChar = keywords.some(k => k.toLowerCase() === 'character');
+          const isEpicHero = keywords.some(k => k.toLowerCase() === 'epic hero');
+
+          if (isEpicHero && !matchedEnh.isEquipableByEpicHero) {
+            validationErrors.push(`Invalid Enhancement: Epic Hero "${u.name}" cannot be given upgrade/enhancement "${u.enhancementName}".`);
+          } else if (!isChar && !matchedEnh.isEquipableByNonCharacterUnit) {
+            validationErrors.push(`Invalid Enhancement: Non-Character unit "${u.name}" cannot be given upgrade/enhancement "${u.enhancementName}".`);
+          } else if (!isUnitEligibleForEnhancement(keywords, matchedEnh)) {
+            validationErrors.push(`Invalid Enhancement: "${u.enhancementName}" cannot be given to "${u.name}" due to keyword restrictions.`);
+          }
+        }
+      }
+    });
+
+    Object.entries(enhancementCounts).forEach(([enhName, count]) => {
+      const matchedEnh = selectedDetachments
+        .flatMap(d => d.enhancements)
+        .find(e => e.name === enhName);
+      const limit = matchedEnh?.limit ?? 1;
+      if (count > limit) {
+        if (limit === 1) {
+          validationErrors.push(`Duplicate enhancement selected: "${enhName}" is assigned to multiple units (Only 1 copy allowed).`);
+        } else {
+          validationErrors.push(`Exceeded allowance for upgrade "${enhName}": selected ${count} copies (Max is ${limit}).`);
         }
       }
     });
@@ -2306,14 +2818,25 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           <div className="print-preview-body" id="print-slate-root">
 
             {/* Non-printed header instructions */}
-            <div className="no-print" style={{ color: '#000', borderBottom: '1px solid #cbd5e1', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
-              <h4 style={{ margin: 0, textTransform: 'uppercase', fontSize: '0.95rem' }}>B&W Print Preview</h4>
-              <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
-                {printLayout === 'tabular'
-                  ? 'Displays a neat battle-ready summary sheet. Adjust page settings to print portrait.'
-                  : 'Displays ID-1 credit card size datacards (85.60mm x 53.98mm) with cutting outlines.'
-                }
-              </p>
+            <div className="no-print" style={{ color: '#000', borderBottom: '1px solid #cbd5e1', paddingBottom: '0.75rem', marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h4 style={{ margin: 0, textTransform: 'uppercase', fontSize: '0.95rem' }}>B&W Print Preview</h4>
+                <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                  {printLayout === 'tabular'
+                    ? 'Displays a neat battle-ready summary sheet. Adjust page settings to print portrait.'
+                    : 'Displays ID-1 credit card size datacards (85.60mm x 53.98mm) with cutting outlines.'
+                  }
+                </p>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', color: '#0f172a' }}>
+                <input
+                  type="checkbox"
+                  checked={collapseDuplicates}
+                  onChange={(e) => setCollapseDuplicates(e.target.checked)}
+                  style={{ cursor: 'pointer' }}
+                />
+                Collapse Identical Units
+              </label>
             </div>
 
             {printLayout === 'tabular' ? (
@@ -2333,15 +2856,24 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 <table className="print-bw-skim-table">
                   <thead>
                     <tr>
-                      <th style={{ width: '25%' }}>Unit / Attachment</th>
-                      <th style={{ width: '8%', textAlign: 'center' }}>Models</th>
-                      <th style={{ width: '8%', textAlign: 'center' }}>Points</th>
-                      <th style={{ width: '25%', textAlign: 'center' }}>Statline (M / T / Sv / W / Ld / OC)</th>
-                      <th style={{ width: '34%' }}>Keywords / Enhancements / Key Abilities</th>
+                      <th rowSpan={2} style={{ width: '25%' }}>Unit / Attachment</th>
+                      <th rowSpan={2} style={{ width: '6%', textAlign: 'center' }}>Models</th>
+                      <th rowSpan={2} style={{ width: '6%', textAlign: 'center' }}>Points</th>
+                      <th colSpan={7} style={{ textAlign: 'center', borderBottom: '1px solid #cbd5e1' }}>Statline</th>
+                      <th rowSpan={2} style={{ width: '39%' }}>Keywords / Enhancements / Key Abilities</th>
+                    </tr>
+                    <tr>
+                      <th style={{ width: '3%', textAlign: 'center', fontSize: '8pt' }}>M</th>
+                      <th style={{ width: '3%', textAlign: 'center', fontSize: '8pt' }}>T</th>
+                      <th style={{ width: '3%', textAlign: 'center', fontSize: '8pt' }}>Sv</th>
+                      <th style={{ width: '3%', textAlign: 'center', fontSize: '8pt' }}>Inv</th>
+                      <th style={{ width: '3%', textAlign: 'center', fontSize: '8pt' }}>W</th>
+                      <th style={{ width: '3%', textAlign: 'center', fontSize: '8pt' }}>Ld</th>
+                      <th style={{ width: '3%', textAlign: 'center', fontSize: '8pt' }}>OC</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {roster.map(unit => {
+                    {getPrintableRoster(roster, factionData, collapseDuplicates).map(({ unit, indent, roleLabel, count, pointsRange }) => {
                       const matched = findCatalogUnit(unit.unitSlug);
                       const ds = matched?.appDatasheet;
                       const firstModel = ds?.models?.[0];
@@ -2352,18 +2884,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                       if (unit.isWarlord) {
                         detailsLabel += '★ WARLORD ';
                       }
-                      if (unit.isCharacter) {
-                        if (unit.attachedToId) {
-                          const bodyguard = roster.find(r => r.id === unit.attachedToId);
-                          detailsLabel += `(Attached to ${bodyguard?.name || 'Bodyguard'})`;
-                        } else {
-                          detailsLabel += '(Independent)';
-                        }
-                      } else {
-                        const leaders = roster.filter(r => r.isCharacter && r.attachedToId === unit.id);
-                        if (leaders.length > 0) {
-                          detailsLabel += `[Leaders: ${leaders.map(l => l.name).join(', ')}]`;
-                        }
+                      if (roleLabel) {
+                        detailsLabel += `(${roleLabel})`;
                       }
 
                       // Enhancements
@@ -2375,22 +2897,28 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                       // Abilities list
                       const abilities = ds?.abilities.map(a => a.name).join(', ') || '';
 
+                      const nameDisplay = count > 1 ? `${unit.name} (x${count})` : unit.name;
+
                       return (
-                        <tr key={unit.id} style={{ fontSize: '9pt' }}>
-                          <td>
-                            <strong>{unit.name}</strong>
-                            {detailsLabel && <div style={{ fontSize: '8pt', color: '#4b5563', marginTop: '2px' }}>{detailsLabel}</div>}
+                        <tr key={unit.id} style={{ fontSize: '9pt', backgroundColor: indent ? '#f8fafc' : 'transparent' }}>
+                          <td style={{ paddingLeft: indent ? '1.5rem' : '0.5rem' }}>
+                            {indent && <span style={{ color: '#94a3b8', marginRight: '0.4rem', fontFamily: 'monospace' }}>↳</span>}
+                            <strong>{nameDisplay}</strong>
+                            {detailsLabel && <div style={{ fontSize: '8pt', color: '#64748b', marginTop: '2px' }}>{detailsLabel}</div>}
                           </td>
-                          <td style={{ textAlign: 'center' }}>{unit.modelsCount}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            {count > 1 ? `${unit.modelsCount} (x${count})` : unit.modelsCount}
+                          </td>
                           <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
-                            {unit.points + (unit.enhancementPoints || 0)}
+                            {pointsRange}
                           </td>
-                          <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>
-                            {stats
-                              ? `${stats.M} | ${stats.T} | ${stats.Sv} | ${stats.W} | ${stats.Ld} | ${stats.OC}`
-                              : '—'
-                            }
-                          </td>
+                          <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>{stats ? stats.M : '—'}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>{stats ? stats.T : '—'}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>{stats ? stats.Sv : '—'}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>{stats && stats.Inv ? `${stats.Inv}+` : ''}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>{stats ? stats.W : '—'}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>{stats ? stats.Ld : '—'}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'monospace' }}>{stats ? stats.OC : '—'}</td>
                           <td>
                             <div style={{ fontSize: '8.5pt' }}>
                               {firstModel?.keywords.length ? (
@@ -2409,159 +2937,195 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 </table>
 
                 {/* Print Weapon Cheat Sheet in Tabular Layout */}
-                <div style={{ marginTop: '2rem' }}>
-                  <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
-                    Weapon Summary Profiles
-                  </h3>
-                  <table className="print-bw-skim-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: '25%' }}>Unit / Weapon</th>
-                        <th style={{ width: '10%', textAlign: 'center' }}>Range</th>
-                        <th style={{ width: '8%', textAlign: 'center' }}>A</th>
-                        <th style={{ width: '10%', textAlign: 'center' }}>BS / WS</th>
-                        <th style={{ width: '8%', textAlign: 'center' }}>S</th>
-                        <th style={{ width: '8%', textAlign: 'center' }}>AP</th>
-                        <th style={{ width: '8%', textAlign: 'center' }}>D</th>
-                        <th style={{ width: '23%' }}>Rules</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {roster.flatMap(unit => {
-                        if (unit.splitSquad) {
-                          return [
-                            { ...unit, id: `${unit.id}-squad-a`, virtualName: `${unit.name} (Squad A)`, virtualModelsCount: 5 },
-                            { ...unit, id: `${unit.id}-squad-b`, virtualName: `${unit.name} (Squad B)`, virtualModelsCount: 5 }
-                          ];
-                        }
-                        return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount }];
-                      }).map(unit => {
-                        const matched = findCatalogUnit(unit.unitSlug);
-                        const ds = matched?.appDatasheet;
-                        if (!ds || !ds.models) return null;
+                {(() => {
+                  const uniqueUnitSlugs = Array.from(new Set(roster.map(u => u.unitSlug)));
+                  const rangedWeaponRows: React.ReactNode[] = [];
+                  const meleeWeaponRows: React.ReactNode[] = [];
 
-                        // Get all weapon profiles across models
-                        const weaponRows: React.ReactNode[] = [];
-                        const seenProfiles = new Set<string>();
-                        const modelCounts = getRosterUnitModelCounts(unit, ds);
-                        let isFirstActive = true;
+                  uniqueUnitSlugs.forEach(slug => {
+                    const matched = findCatalogUnit(slug);
+                    const ds = matched?.appDatasheet;
+                    if (!ds || !ds.models) return;
 
-                        ds.models.forEach(model => {
-                          const totalModelCount = modelCounts[model.name] || 0;
-                          if (totalModelCount === 0) return;
-                          const activeWeapons = getUnitActiveWeapons(unit, model, totalModelCount, isFirstActive);
-                          isFirstActive = false;
-                          activeWeapons.forEach(weapon => {
-                            weapon.profiles?.forEach(prof => {
-                              const key = `${weapon.name}-${prof.name}-${prof.range}`;
-                              if (seenProfiles.has(key)) return;
-                              seenProfiles.add(key);
+                    const units = roster.filter(u => u.unitSlug === slug);
+                    const seenProfiles = new Set<string>();
 
-                              const skill = prof.type === 'melee' ? prof.weaponSkill : prof.ballisticSkill;
+                    units.forEach(unit => {
+                      const modelCounts = getRosterUnitModelCounts(unit, ds);
+                      let isFirstActive = true;
 
-                              weaponRows.push(
-                                <tr key={key} style={{ fontSize: '8.5pt' }}>
-                                  <td>
-                                    <strong>{unit.virtualName}</strong>
-                                    <div style={{ fontSize: '8pt', color: '#4b5563' }}>
-                                      {weapon.name} {prof.name !== weapon.name ? `(${prof.name})` : ''}
+                      ds.models.forEach(model => {
+                        const totalModelCount = modelCounts[model.name] || 0;
+                        if (totalModelCount === 0) return;
+                        const activeWeapons = getUnitActiveWeapons(unit, model, totalModelCount, isFirstActive);
+                        isFirstActive = false;
+
+                        activeWeapons.forEach(weapon => {
+                          weapon.profiles?.forEach(prof => {
+                            const key = `${weapon.name}-${prof.name}-${prof.range}-${prof.attacks}-${prof.strength}-${prof.armourPenetration}-${prof.damage}`;
+                            if (seenProfiles.has(key)) return;
+                            seenProfiles.add(key);
+
+                            const skill = prof.type === 'melee' ? prof.weaponSkill : prof.ballisticSkill;
+                            const isMelee = prof.type === 'melee';
+
+                            const row = (
+                              <tr key={`${unit.id}-${key}`} style={{ fontSize: '8.5pt' }}>
+                                <td>
+                                  <strong>{matched.name}</strong>
+                                  <div style={{ fontSize: '8pt', color: '#4b5563' }}>
+                                    {weapon.name} {prof.name !== weapon.name ? `(${prof.name})` : ''}
+                                  </div>
+                                </td>
+                                <td style={{ textAlign: 'center' }}>{isMelee ? 'Melee' : prof.range}</td>
+                                <td style={{ textAlign: 'center' }}>{prof.attacks}</td>
+                                <td style={{ textAlign: 'center' }}>{skill || '—'}</td>
+                                <td style={{ textAlign: 'center' }}>{prof.strength}</td>
+                                <td style={{ textAlign: 'center' }}>{prof.armourPenetration}</td>
+                                <td style={{ textAlign: 'center' }}>{prof.damage}</td>
+                                <td style={{ fontSize: '8pt' }}>
+                                  {prof.rules && prof.rules.length > 0 ? (
+                                    <div style={{ fontSize: '7.5pt', color: '#4b5563', fontStyle: 'italic' }}>
+                                      {prof.rules.join(', ')}
                                     </div>
-                                  </td>
-                                  <td style={{ textAlign: 'center' }}>{prof.type === 'melee' ? 'Melee' : prof.range}</td>
-                                  <td style={{ textAlign: 'center' }}>{prof.attacks}</td>
-                                  <td style={{ textAlign: 'center' }}>{skill || '—'}</td>
-                                  <td style={{ textAlign: 'center' }}>{prof.strength}</td>
-                                  <td style={{ textAlign: 'center' }}>{prof.armourPenetration}</td>
-                                  <td style={{ textAlign: 'center' }}>{prof.damage}</td>
-                                  <td style={{ fontSize: '8pt' }}>
-                                    <div>{prof.type === 'melee' ? 'Melee' : 'Ranged'}</div>
-                                    {prof.rules && prof.rules.length > 0 && (
-                                      <div style={{ fontSize: '7.5pt', color: '#4b5563', fontStyle: 'italic', marginTop: '2px' }}>
-                                        {prof.rules.join(', ')}
-                                      </div>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            });
+                                  ) : '—'}
+                                </td>
+                              </tr>
+                            );
+
+                            if (isMelee) {
+                              meleeWeaponRows.push(row);
+                            } else {
+                              rangedWeaponRows.push(row);
+                            }
                           });
                         });
+                      });
+                    });
+                  });
 
-                        return weaponRows.length > 0 ? weaponRows : null;
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                  return (
+                    <>
+                      {rangedWeaponRows.length > 0 && (
+                        <div style={{ marginTop: '2rem' }}>
+                          <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
+                            Ranged Weapon Summary Profiles
+                          </h3>
+                          <table className="print-bw-skim-table">
+                            <thead>
+                              <tr>
+                                <th style={{ width: '25%' }}>Unit / Weapon</th>
+                                <th style={{ width: '10%', textAlign: 'center' }}>Range</th>
+                                <th style={{ width: '8%', textAlign: 'center' }}>A</th>
+                                <th style={{ width: '10%', textAlign: 'center' }}>BS</th>
+                                <th style={{ width: '8%', textAlign: 'center' }}>S</th>
+                                <th style={{ width: '8%', textAlign: 'center' }}>AP</th>
+                                <th style={{ width: '8%', textAlign: 'center' }}>D</th>
+                                <th style={{ width: '23%' }}>Rules</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rangedWeaponRows}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
 
+                      {meleeWeaponRows.length > 0 && (
+                        <div style={{ marginTop: '2rem' }}>
+                          <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
+                            Melee Weapon Summary Profiles
+                          </h3>
+                          <table className="print-bw-skim-table">
+                            <thead>
+                              <tr>
+                                <th style={{ width: '25%' }}>Unit / Weapon</th>
+                                <th style={{ width: '10%', textAlign: 'center' }}>Range</th>
+                                <th style={{ width: '8%', textAlign: 'center' }}>A</th>
+                                <th style={{ width: '10%', textAlign: 'center' }}>WS</th>
+                                <th style={{ width: '8%', textAlign: 'center' }}>S</th>
+                                <th style={{ width: '8%', textAlign: 'center' }}>AP</th>
+                                <th style={{ width: '8%', textAlign: 'center' }}>D</th>
+                                <th style={{ width: '23%' }}>Rules</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {meleeWeaponRows}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             ) : (
               // 2. ISO/IEC 7810 ID-1 Datacards Print Grid
               <div className="print-cards-grid">
-                {roster.flatMap(unit => {
-                  if (unit.splitSquad) {
-                    return [
-                      { ...unit, id: `${unit.id}-squad-a`, virtualName: `${unit.name} (Squad A)`, virtualModelsCount: 5 },
-                      { ...unit, id: `${unit.id}-squad-b`, virtualName: `${unit.name} (Squad B)`, virtualModelsCount: 5 }
-                    ];
-                  }
-                  return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount }];
-                }).map(unit => {
-                  const matched = findCatalogUnit(unit.unitSlug);
-                  const ds = matched?.appDatasheet;
-                  const firstModel = ds?.models?.[0];
-                  const stats = firstModel?.stats;
+                {(() => {
+                  const cardList = getPrintableCardsRoster(roster, factionData, collapseDuplicates);
+                  return cardList.map(({ id, unit, count, pointsDisplay }) => {
+                    const matched = findCatalogUnit(unit.unitSlug);
+                    const ds = matched?.appDatasheet;
+                    const firstModel = ds?.models?.[0];
+                    const stats = firstModel?.stats;
 
-                  // Extract and format weapon profiles compactly
-                  const formattedWeapons: string[] = [];
-                  if (ds) {
-                    const modelCounts = getRosterUnitModelCounts(unit, ds);
-                    let isFirstActive = true;
-                    ds.models.forEach(m => {
-                      const totalModelCount = modelCounts[m.name] || 0;
-                      if (totalModelCount === 0) return;
-                      const activeWeapons = getUnitActiveWeapons(unit, m, totalModelCount, isFirstActive);
-                      isFirstActive = false;
-                      activeWeapons.forEach(w => {
-                        const formatted = formatCompactWeapon(w);
-                        if (!formattedWeapons.includes(formatted)) {
-                          formattedWeapons.push(formatted);
-                        }
+                    // Extract and format weapon profiles compactly
+                    const formattedWeapons: string[] = [];
+                    if (ds) {
+                      const modelCounts = getRosterUnitModelCounts(unit, ds);
+                      let isFirstActive = true;
+                      ds.models.forEach(m => {
+                        const totalModelCount = modelCounts[m.name] || 0;
+                        if (totalModelCount === 0) return;
+                        const activeWeapons = getUnitActiveWeapons(unit, m, totalModelCount, isFirstActive);
+                        isFirstActive = false;
+                        activeWeapons.forEach(w => {
+                          const formatted = formatCompactWeapon(w);
+                          if (!formattedWeapons.includes(formatted)) {
+                            formattedWeapons.push(formatted);
+                          }
+                        });
                       });
-                    });
-                  }
+                    }
 
-                  // Abilities list
-                  const abilities = ds?.abilities.map(a => a.name).join(', ') || '';
+                    // Abilities list
+                    const abilities = ds?.abilities.map(a => a.name).join(', ') || '';
 
-                  // Attached indicator
-                  let attachmentInfo = '';
-                  if (unit.isCharacter) {
-                    if (unit.attachedToId) {
-                      const bodyguard = roster.find(r => r.id === unit.attachedToId);
-                      if (bodyguard) {
-                        attachmentInfo = `Leads: ${bodyguard.name}`;
+                    // Attached indicator
+                    let attachmentInfo = '';
+                    if (unit.isCharacter) {
+                      if (unit.attachedToId) {
+                        const bodyguardCu = cardList.find(c => c.unit.id === unit.attachedToId || c.id === unit.attachedToId);
+                        if (bodyguardCu) {
+                          attachmentInfo = `Leads: ${bodyguardCu.unit.name}`;
+                        } else {
+                          const bodyguard = roster.find(r => r.id === unit.attachedToId);
+                          if (bodyguard) {
+                            attachmentInfo = `Leads: ${bodyguard.name}`;
+                          }
+                        }
+                      }
+                    } else {
+                      const leaders = cardList.filter(c => c.unit.isCharacter && (c.unit.attachedToId === unit.id || c.unit.attachedToId === id));
+                      if (leaders.length > 0) {
+                        attachmentInfo = `Led by: ${leaders.map(l => l.unit.name).join(', ')}`;
                       }
                     }
-                  } else {
-                    const leaders = roster.filter(r => r.isCharacter && r.attachedToId === unit.id);
-                    if (leaders.length > 0) {
-                      attachmentInfo = `Led by: ${leaders.map(l => l.name).join(', ')}`;
-                    }
-                  }
 
-                  return (
-                    <div key={unit.id} className="id1-datacard">
+                    return (
+                      <div key={id} className="id1-datacard">
 
-                      {/* Card Header */}
-                      <div className="id1-datacard-header">
-                        <div className="id1-datacard-title">
-                          {unit.isWarlord && <Crown size={8} style={{ display: 'inline', marginRight: '2px', verticalAlign: 'middle' }} />}
-                          {unit.virtualName}
+                        {/* Card Header */}
+                        <div className="id1-datacard-header">
+                          <div className="id1-datacard-title">
+                            {unit.isWarlord && <Crown size={8} style={{ display: 'inline', marginRight: '2px', verticalAlign: 'middle' }} />}
+                            {unit.virtualName}
+                          </div>
+                          <div className="id1-datacard-points">
+                            {pointsDisplay} | {unit.virtualModelsCount} mdl
+                          </div>
                         </div>
-                        <div className="id1-datacard-points">
-                          {unit.splitSquad ? `${unit.points / 2} pts (Split)` : `${unit.points + (unit.enhancementPoints || 0)} pts`} | {unit.virtualModelsCount} mdl
-                        </div>
-                      </div>
 
                       {/* Statline Table */}
                       {stats ? (
@@ -2651,7 +3215,15 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     const selectedDetachmentId = selectedDetachmentSlugs[0] ? factionData.detachments.find(d => d.slug === selectedDetachmentSlugs[0])?.id : null;
     const costOptions = getDatasheetCosts(matchedCatalog?.appDatasheet, factionData.factionKeywordIds || [], selectedDetachmentId, factionData.slug);
 
-    // Enhancements are offered from every selected detachment (grouped when several)
+    // Enhancements are offered from every selected detachment (filtered by eligibility)
+    const keywords = matchedCatalog?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+    const isEpicHero = keywords.some(k => k.toLowerCase() === 'epic hero');
+    const eligibleEnhancements = selectedDetachments.flatMap(d => d.enhancements).filter(e => {
+      if (isEpicHero) return !!e.isEquipableByEpicHero;
+      if (!unit.isCharacter) return !!e.isEquipableByNonCharacterUnit;
+      return true;
+    }).filter(e => isUnitEligibleForEnhancement(keywords, e));
+    const hasFactionNonCharEnh = factionData?.detachments?.some(d => d.enhancements?.some(e => e.isEquipableByNonCharacterUnit)) || false;
 
     // Leader attach targets (units in roster that are not characters and are compatible)
     const validBodyguards = roster.filter(b => !b.isCharacter);
@@ -2680,9 +3252,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent-gold)' }}>
-              {unit.points + (unit.enhancementPoints || 0)} pts
-            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent-gold)' }}>
+                {getUnitActualPoints(unit, roster, factionData) + (unit.enhancementPoints || 0)} pts
+              </span>
+              {getUnitActualPoints(unit, roster, factionData) > unit.points && (
+                <span style={{ fontSize: '0.65rem', color: 'var(--accent-red)', fontWeight: 600 }}>
+                  (+{getUnitActualPoints(unit, roster, factionData) - unit.points} duplicate cost)
+                </span>
+              )}
+            </div>
             <button
               className="button-outline"
               onClick={() => handleRemoveUnit(unit.id)}
@@ -2722,15 +3301,44 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
             </div>
           )}
 
-          {/* 2. Attachment triggers (Characters only) */}
-          {unit.isCharacter && (
-            <>
-              {/* Leader Attachment Bodyguard Selection */}
+          {/* 2. Attachment triggers (Characters only - only display if there are compatible squads they can lead) */}
+          {unit.isCharacter && validBodyguards.filter(b => checkCompatibility(unit, b)).length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Attach to Squad</span>
+              <select
+                value={unit.attachedToId || ''}
+                onChange={(e) => handleAttachLeader(unit.id, e.target.value)}
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: '6px',
+                  padding: '0.3rem 0.6rem',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="">Independent</option>
+                {validBodyguards.filter(b => checkCompatibility(unit, b)).map(b => {
+                  const check = canAttachCharacterToSquad(unit, b, roster, factionData);
+                  return (
+                    <option key={b.id} value={b.id} disabled={!check.allowed}>
+                      {b.name} ({b.points} pts){!check.allowed ? ` (${check.reason})` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+
+          {/* 3. Upgrades / Enhancements selection (if eligible enhancements exist or detachment is not selected) */}
+          {selectedDetachments.length > 0 ? (
+            eligibleEnhancements.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Attach to Squad</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Detachment Upgrade</span>
                 <select
-                  value={unit.attachedToId || ''}
-                  onChange={(e) => handleAttachLeader(unit.id, e.target.value)}
+                  value={unit.enhancementName || ''}
+                  onChange={(e) => handleSelectEnhancement(unit.id, e.target.value)}
                   style={{
                     background: 'var(--bg-tertiary)',
                     color: 'var(--text-primary)',
@@ -2741,109 +3349,99 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                     cursor: 'pointer'
                   }}
                 >
-                  <option value="">Independent</option>
-                  {validBodyguards.map(b => {
-                    const isComp = checkCompatibility(unit, b);
-                    return (
-                      <option key={b.id} value={b.id}>
-                        {isComp ? '★ ' : ''}{b.name} ({b.points} pts)
-                      </option>
-                    );
-                  })}
+                  <option value="none">-- Select Upgrade --</option>
+                  {selectedDetachments.length === 1 ? (
+                    eligibleEnhancements.map(e => {
+                      const alreadySelectedCount = roster.filter(u => u.id !== unit.id && u.enhancementName === e.name).length;
+                      const isLimitReached = alreadySelectedCount >= (e.limit ?? 1);
+                      return (
+                        <option key={e.name} value={e.name} disabled={isLimitReached}>
+                          {e.name} (+{e.pointsCost} pts){isLimitReached ? ' (Limit Reached)' : ''}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    selectedDetachments.map(d => {
+                      const detEligible = d.enhancements.filter(e => {
+                        if (isEpicHero) return !!e.isEquipableByEpicHero;
+                        if (!unit.isCharacter) return !!e.isEquipableByNonCharacterUnit;
+                        return true;
+                      }).filter(e => isUnitEligibleForEnhancement(keywords, e));
+                      if (detEligible.length === 0) return null;
+                      return (
+                        <optgroup key={d.slug} label={d.name}>
+                          {detEligible.map(e => {
+                            const alreadySelectedCount = roster.filter(u => u.id !== unit.id && u.enhancementName === e.name).length;
+                            const isLimitReached = alreadySelectedCount >= (e.limit ?? 1);
+                            return (
+                              <option key={e.name} value={e.name} disabled={isLimitReached}>
+                                {e.name} (+{e.pointsCost} pts){isLimitReached ? ' (Limit Reached)' : ''}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      );
+                    })
+                  )}
                 </select>
               </div>
+            )
+          ) : (
+            (unit.isCharacter || hasFactionNonCharEnh) && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', alignSelf: 'flex-end', paddingBottom: '0.25rem' }}>
+                Select a Detachment to enable Upgrades
+              </span>
+            )
+          )}
 
-              {/* 3. Enhancements selection (Characters only, requires at least one detachment) */}
-              {selectedDetachments.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Detachment Enhancement</span>
-                  <select
-                    value={unit.enhancementName || ''}
-                    onChange={(e) => handleSelectEnhancement(unit.id, e.target.value)}
-                    style={{
-                      background: 'var(--bg-tertiary)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--glass-border)',
-                      borderRadius: '6px',
-                      padding: '0.3rem 0.6rem',
-                      fontSize: '0.8rem',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="none">-- Select Enhancement --</option>
-                    {selectedDetachments.length === 1 ? (
-                      selectedDetachments[0].enhancements.map(e => (
-                        <option key={e.name} value={e.name}>
-                          {e.name} (+{e.pointsCost} pts)
-                        </option>
-                      ))
-                    ) : (
-                      selectedDetachments.map(d => (
-                        <optgroup key={d.slug} label={d.name}>
-                          {d.enhancements.map(e => (
-                            <option key={e.name} value={e.name}>
-                              {e.name} (+{e.pointsCost} pts)
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))
-                    )}
-                  </select>
-                </div>
-              ) : (
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', alignSelf: 'flex-end', paddingBottom: '0.25rem' }}>
-                  Select a Detachment to enable Enhancements
-                </span>
-              )}
+          {/* 4. Warlord switch (Characters only) */}
+          {unit.isCharacter && (
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                color: unit.isWarlord ? 'var(--accent-gold)' : 'var(--text-secondary)',
+                userSelect: 'none',
+                marginLeft: 'auto',
+                fontWeight: unit.isWarlord ? 700 : 400
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={unit.isWarlord || false}
+                onChange={() => handleToggleWarlord(unit.id)}
+                style={{ cursor: 'pointer' }}
+              />
+              Warlord
+            </label>
+          )}
 
-              {/* 4. Warlord switch (Characters only) */}
-              <label
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  color: unit.isWarlord ? 'var(--accent-gold)' : 'var(--text-secondary)',
-                  userSelect: 'none',
-                  marginLeft: 'auto',
-                  fontWeight: unit.isWarlord ? 700 : 400
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={unit.isWarlord || false}
-                  onChange={() => handleToggleWarlord(unit.id)}
-                  style={{ cursor: 'pointer' }}
-                />
-                Warlord
-              </label>
-
-              {/* 5. Split Squad switch (eligible squads only) */}
-              {canUnitSplit(unit.name, unit.modelsCount, matchedCatalog?.appDatasheet?.abilities || [], matchedCatalog?.appDatasheet?.rules || []) && (
-                <label
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    color: unit.splitSquad ? 'var(--accent-teal)' : 'var(--text-secondary)',
-                    userSelect: 'none',
-                    marginLeft: unit.isCharacter ? '1rem' : 'auto',
-                    fontWeight: unit.splitSquad ? 700 : 400
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={unit.splitSquad || false}
-                    onChange={() => handleToggleSplitSquad(unit.id)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                  Combat Squad Split
-                </label>
-              )}
-            </>
+          {/* 5. Split Squad switch (eligible squads only) */}
+          {canUnitSplit(unit.name, unit.modelsCount, matchedCatalog?.appDatasheet?.abilities || [], matchedCatalog?.appDatasheet?.rules || []) && (
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                color: unit.splitSquad ? 'var(--accent-teal)' : 'var(--text-secondary)',
+                userSelect: 'none',
+                marginLeft: unit.isCharacter ? '1rem' : 'auto',
+                fontWeight: unit.splitSquad ? 700 : 400
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={unit.splitSquad || false}
+                onChange={() => handleToggleSplitSquad(unit.id)}
+                style={{ cursor: 'pointer' }}
+              />
+              Combat Squad Split
+            </label>
           )}
 
         </div>

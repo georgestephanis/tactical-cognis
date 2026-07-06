@@ -667,12 +667,71 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
   `);
 
   // Fetch enhancements
-  const enhancements = await query(`
-    SELECT id, detachmentId, name, basePointsCost as pointsCost, lore, rules, cannotBeWarlord
-    FROM enhancement
-    WHERE detachmentId IN (${detIds})
-    ORDER BY displayOrder
-  `);
+  let enhancements: any[] = [];
+  try {
+    const enhCols = await query(`PRAGMA table_info(enhancement)`);
+    const hasNewCols = enhCols.some(c => String(c.name) === 'isEquipableByNonCharacterUnit');
+    if (hasNewCols) {
+      enhancements = await query(`
+        SELECT id, detachmentId, name, basePointsCost as pointsCost, lore, rules, cannotBeWarlord, isEquipableByNonCharacterUnit, isEquipableByEpicHero, [limit], isIncludedInEnhancementLimit
+        FROM enhancement
+        WHERE detachmentId IN (${detIds})
+        ORDER BY displayOrder
+      `);
+    } else {
+      enhancements = await query(`
+        SELECT id, detachmentId, name, basePointsCost as pointsCost, lore, rules, cannotBeWarlord
+        FROM enhancement
+        WHERE detachmentId IN (${detIds})
+        ORDER BY displayOrder
+      `);
+    }
+  } catch (err) {
+    console.error('Error fetching enhancements:', err);
+    // Fallback to basic query
+    enhancements = await query(`
+      SELECT id, detachmentId, name, basePointsCost as pointsCost, lore, rules, cannotBeWarlord
+      FROM enhancement
+      WHERE detachmentId IN (${detIds})
+      ORDER BY displayOrder
+    `);
+  }
+
+  // Fetch required keywords for enhancements
+  let requiredKeywords: any[] = [];
+  try {
+    requiredKeywords = await query(`
+      SELECT 
+        erkg.enhancementId, 
+        erkg.id as groupId, 
+        k.name as keywordName
+      FROM enhancement_required_keyword_group erkg
+      JOIN enhancement_required_keyword_group_keyword erkgk ON erkg.id = erkgk.enhancementRequiredKeywordGroupId
+      JOIN keyword k ON erkgk.keywordId = k.id
+      WHERE erkg.enhancementId IN (
+        SELECT id FROM enhancement WHERE detachmentId IN (${detIds})
+      )
+    `);
+  } catch (err) {
+    console.warn("Could not fetch required keywords for enhancements:", err);
+  }
+
+  // Fetch excluded keywords for enhancements
+  let excludedKeywords: any[] = [];
+  try {
+    excludedKeywords = await query(`
+      SELECT 
+        eek.enhancementId, 
+        k.name as keywordName
+      FROM enhancement_excluded_keyword eek
+      JOIN keyword k ON eek.keywordId = k.id
+      WHERE eek.enhancementId IN (
+        SELECT id FROM enhancement WHERE detachmentId IN (${detIds})
+      )
+    `);
+  } catch (err) {
+    console.warn("Could not fetch excluded keywords for enhancements:", err);
+  }
 
   // Fetch stratagems
   const stratagems = await query(`
@@ -697,11 +756,30 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
       ...det,
       slug: slugify(String(det.name)),
       rules: rules.filter(r => r.detachmentId === det.id),
-      enhancements: enhancements.filter(e => e.detachmentId === det.id).map(e => ({
-        ...e,
-        pointsCost: Number(e.pointsCost) || 0,
-        cannotBeWarlord: !!e.cannotBeWarlord,
-      })),
+      enhancements: enhancements.filter(e => e.detachmentId === det.id).map(e => {
+        // Group required keywords by groupId
+        const reqKws = requiredKeywords.filter(rk => rk.enhancementId === e.id);
+        const groupsMap = new Map<string, string[]>();
+        reqKws.forEach(rk => {
+          if (!groupsMap.has(rk.groupId)) groupsMap.set(rk.groupId, []);
+          groupsMap.get(rk.groupId)!.push(String(rk.keywordName));
+        });
+        const requiredKeywordGroups = Array.from(groupsMap.values());
+
+        const exclKws = excludedKeywords.filter(ek => ek.enhancementId === e.id).map(ek => String(ek.keywordName));
+
+        return {
+          ...e,
+          pointsCost: Number(e.pointsCost) || 0,
+          cannotBeWarlord: !!e.cannotBeWarlord,
+          isEquipableByNonCharacterUnit: e.isEquipableByNonCharacterUnit !== undefined ? !!e.isEquipableByNonCharacterUnit : false,
+          isEquipableByEpicHero: e.isEquipableByEpicHero !== undefined ? !!e.isEquipableByEpicHero : false,
+          limit: e.limit !== undefined && e.limit !== null ? Number(e.limit) : 1,
+          isIncludedInEnhancementLimit: e.isIncludedInEnhancementLimit !== undefined ? !!e.isIncludedInEnhancementLimit : true,
+          requiredKeywordGroups,
+          excludedKeywords: exclKws,
+        };
+      }),
       stratagems: stratagems.filter(s => s.detachmentId === det.id),
       restrictions: restrictions,
     };

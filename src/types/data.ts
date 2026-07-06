@@ -105,8 +105,8 @@ export interface AlliedLimit {
 }
 
 export interface PointsStep {
-  atModels: number;
-  points: number;
+  stepAt: number;
+  stepPoints: number;
 }
 
 export interface Ability {
@@ -157,12 +157,18 @@ export interface AppDetachmentRule {
 }
 
 export interface AppEnhancement {
-  id: string;
+  id?: string;
   name: string;
   pointsCost: number | null;
   cannotBeWarlord: boolean;
   lore: string | null;
   rules: string | null;
+  isEquipableByNonCharacterUnit?: boolean;
+  isEquipableByEpicHero?: boolean;
+  limit?: number;
+  isIncludedInEnhancementLimit?: boolean;
+  requiredKeywordGroups?: string[][];
+  excludedKeywords?: string[];
 }
 
 export interface AppStratagem {
@@ -205,13 +211,7 @@ export interface MergedDetachment {
   isFactionPack: boolean;
   detachmentPointsCost: number | null;
   rules: AppDetachmentRule[];
-  enhancements: {
-    name: string;
-    pointsCost: number | null;
-    cannotBeWarlord: boolean;
-    lore: string | null;
-    rules: string | null;
-  }[];
+  enhancements: AppEnhancement[];
   stratagems: AppStratagem[];
   restrictions: string[]; // detachment unique-keyword restrictions from the DB
 }

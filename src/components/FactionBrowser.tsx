@@ -341,7 +341,12 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                         <h3 style={{ fontSize: '1.15rem', color: 'var(--text-primary)', textTransform: 'uppercase' }}>
                           {unit.name}
                         </h3>
-                        <div style={{ display: 'flex', gap: '0.25rem' }}>
+                        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                          {datasheet?.pointsSteps && datasheet.pointsSteps.length > 0 && (
+                            <span className="badge badge-monster" style={{ fontSize: '0.65rem', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--accent-red)', borderColor: 'rgba(239, 68, 68, 0.3)' }} title="This unit has stepped pricing (costs more for duplicate units)">
+                              Stepped Pricing
+                            </span>
+                          )}
                           {unit.isFactionPack && <span className="badge badge-faction-pack">Faction Pack</span>}
                           {isLegends && <span className="badge badge-legends">Legends</span>}
                         </div>
@@ -530,12 +535,29 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                                     {enh.pointsCost !== null ? `${enh.pointsCost} pts` : '—'}
                                   </span>
                                 </div>
-                                {enh.cannotBeWarlord && (
-                                  <span style={{ fontSize: '0.75rem', color: 'var(--accent-red)', fontWeight: 600, textTransform: 'uppercase' }}>
-                                    Cannot be Warlord
-                                  </span>
-                                )}
-                                {enh.lore && (
+                                 <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.1rem', marginBottom: '0.2rem' }}>
+                                   {enh.cannotBeWarlord && (
+                                     <span style={{ fontSize: '0.7rem', color: 'var(--accent-red)', fontWeight: 700, background: 'rgba(239, 68, 68, 0.1)', padding: '0.15rem 0.4rem', borderRadius: '4px', textTransform: 'uppercase' }}>
+                                       Cannot be Warlord
+                                     </span>
+                                   )}
+                                   {enh.isEquipableByNonCharacterUnit && (
+                                     <span style={{ fontSize: '0.7rem', color: 'var(--accent-teal)', fontWeight: 700, background: 'rgba(0, 242, 254, 0.1)', padding: '0.15rem 0.4rem', borderRadius: '4px', textTransform: 'uppercase' }}>
+                                       Non-Character Squad
+                                     </span>
+                                   )}
+                                   {enh.limit !== undefined && enh.limit > 1 && (
+                                     <span style={{ fontSize: '0.7rem', color: 'var(--accent-gold)', fontWeight: 700, background: 'rgba(226, 168, 38, 0.1)', padding: '0.15rem 0.4rem', borderRadius: '4px', textTransform: 'uppercase' }}>
+                                       Limit: {enh.limit}
+                                     </span>
+                                   )}
+                                   {enh.isIncludedInEnhancementLimit === false && (
+                                     <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 700, background: 'rgba(156, 163, 175, 0.15)', padding: '0.15rem 0.4rem', borderRadius: '4px', textTransform: 'uppercase' }}>
+                                       Free from Limit
+                                     </span>
+                                   )}
+                                 </div>
+                                 {enh.lore && (
                                   <p style={{ fontStyle: 'italic', color: 'var(--text-secondary)', fontSize: '0.8rem', margin: 0 }}>
                                     {enh.lore}
                                   </p>

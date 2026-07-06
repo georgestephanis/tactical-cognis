@@ -537,6 +537,15 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                           <strong style={{ color: 'var(--accent-gold)', fontSize: '0.9rem' }}>{cost.points} pts</strong>
                         </div>
                       ))}
+                      {datasheet.pointsSteps && datasheet.pointsSteps.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
+                          {datasheet.pointsSteps.map((step, sIdx) => (
+                            <div key={sIdx} style={{ fontSize: '0.8rem', color: 'var(--accent-red)', background: 'rgba(239, 68, 68, 0.08)', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                              <span>⚠️ <strong>Stepped Pricing:</strong> From copy #{step.stepAt} onwards, this unit costs +{step.stepPoints} points.</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
