@@ -1094,6 +1094,11 @@ code {
     display: none !important;
   }
 
+  .print-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
   /* Print Datasheet layout */
   .print-bw-datasheet {
     page-break-inside: avoid;

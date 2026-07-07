@@ -422,7 +422,7 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
       return { name: String(item?.name), wargearType: String(item?.wargearType), count: Number(ci.count), profiles: profiles };
     });
     if (!choiceMap.has(String(c.loadoutChoiceSetId))) choiceMap.set(String(c.loadoutChoiceSetId), []);
-    choiceMap.get(String(c.loadoutChoiceSetId))!.push({ id: c.id, wargearItems: items });
+    choiceMap.get(String(c.loadoutChoiceSetId))!.push({ id: c.id, items: items });
   });
 
   const choiceSetsMap = new Map<string, unknown[]>();
@@ -456,8 +456,14 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
       });
       return { name: String(item?.name), wargearType: String(item?.wargearType), count: Number(ci.count), profiles: profiles };
     });
-    if (!limitedChoiceMap.has(String(lc.limitedWargearChoiceSetId))) limitedChoiceMap.set(String(lc.limitedWargearChoiceSetId), []);
-    limitedChoiceMap.get(String(lc.limitedWargearChoiceSetId))!.push({ id: lc.id, wargearItems: items });
+    if (!limitedChoiceMap.has(String(lc.limitedWargearChoiceSetId))) {
+      limitedChoiceMap.set(String(lc.limitedWargearChoiceSetId), []);
+    }
+    limitedChoiceMap.get(String(lc.limitedWargearChoiceSetId))!.push({
+      id: lc.id,
+      wargearItemIds: limitedWargearItems.filter(ci => ci.limitedWargearChoiceId === lc.id).map(ci => String(ci.wargearItemId)),
+      wargearItems: items
+    });
   });
 
   const limitedSetsMap = new Map<string, unknown[]>();

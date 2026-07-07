@@ -362,6 +362,31 @@ function parseOfficialAppExport(text: string, dbFactions: { faction: string; slu
   let currentUnit: ParsedRosterUnit | null = null;
   const startIndex = headerIndex !== -1 ? headerIndex + 1 : 0;
 
+  let insideAttachedUnits = false;
+  let currentAttachedBlock: ParsedRosterUnit[] = [];
+  let unitIndexCounter = 0;
+
+  const flushCurrentUnit = () => {
+    if (currentUnit) {
+      parsed.units.push(currentUnit);
+      if (insideAttachedUnits) {
+        currentAttachedBlock.push(currentUnit);
+      }
+      currentUnit = null;
+    }
+  };
+
+  const flushAttachedBlock = () => {
+    flushCurrentUnit();
+    if (currentAttachedBlock.length >= 2) {
+      const bodyguard = currentAttachedBlock[currentAttachedBlock.length - 1];
+      for (let j = 0; j < currentAttachedBlock.length - 1; j++) {
+        currentAttachedBlock[j].attachedToSourceId = bodyguard.sourceId;
+      }
+    }
+    currentAttachedBlock = [];
+  };
+
   for (let i = startIndex; i < lines.length; i++) {
     const line = lines[i];
     const upperLine = line.toUpperCase().trim();
@@ -375,9 +400,16 @@ function parseOfficialAppExport(text: string, dbFactions: { faction: string; slu
     }
 
     if (/^(CHARACTERS|BATTLELINE|DEDICATED TRANSPORTS|OTHER DATASHEETS|ALLIED UNITS|FORTIFICATIONS|ATTACHED UNITS)$/i.test(upperLine)) {
+      flushAttachedBlock();
+      if (upperLine === 'ATTACHED UNITS') {
+        insideAttachedUnits = true;
+      } else {
+        insideAttachedUnits = false;
+      }
       continue;
     }
     if (/^ATTACHED UNIT \d+$/i.test(upperLine)) {
+      flushAttachedBlock();
       continue;
     }
 
@@ -421,9 +453,7 @@ function parseOfficialAppExport(text: string, dbFactions: { faction: string; slu
     } else {
       const unitMatch = line.match(/^(.+?)\s*\(\s*(\d[\d\s\u00A0,.]*)\s*(?:points?|pts)?\s*\)/i);
       if (unitMatch) {
-        if (currentUnit) {
-          parsed.units.push(currentUnit);
-        }
+        flushCurrentUnit();
         let name = unitMatch[1].trim();
         name = name.replace(/[^a-zA-Z0-9\s'’\-:.,()!&]/g, '').trim();
 
@@ -431,15 +461,14 @@ function parseOfficialAppExport(text: string, dbFactions: { faction: string; slu
           name,
           points: parseInt(unitMatch[2].replace(/[\s\u00A0,.]/g, ''), 10),
           isWarlord: false,
+          sourceId: 'unit-' + unitIndexCounter++,
           rawModelCounts: []
         };
       }
     }
   }
 
-  if (currentUnit) {
-    parsed.units.push(currentUnit);
-  }
+  flushAttachedBlock();
 
   return parsed;
 }
@@ -1441,6 +1470,33 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     return leadsNormalized.includes(normBodyguardName);
   };
 
+  const mustBeWarlord = React.useCallback((unitSlug: string): boolean => {
+    if (!factionData) return false;
+    const unit = factionData.units.find(u => u.slug === unitSlug) || factionData.alliedUnits?.find(u => u.slug === unitSlug);
+    if (!unit || !unit.appDatasheet) return false;
+    return unit.appDatasheet.abilities.some(a =>
+      a.name.toLowerCase() === 'supreme-commander' ||
+      a.name.toLowerCase() === 'supreme commander'
+    );
+  }, [factionData]);
+
+  useEffect(() => {
+    if (!factionData || roster.length === 0) return;
+    const supremeCommanders = roster.filter(u => mustBeWarlord(u.unitSlug));
+    if (supremeCommanders.length > 0) {
+      const targetId = supremeCommanders[0].id;
+      const currentWarlord = roster.find(u => u.isWarlord);
+      if (!currentWarlord || currentWarlord.id !== targetId) {
+        setTimeout(() => {
+          setRoster(prev => prev.map(u => ({
+            ...u,
+            isWarlord: u.id === targetId
+          })));
+        }, 0);
+      }
+    }
+  }, [roster, factionData, mustBeWarlord]);
+
   const applyParsedRoster = (
     parsed: ParsedRoster,
     faction: MergedFaction,
@@ -1645,8 +1701,6 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     if (warnings.length > 0) {
       alert(`Import complete with warnings:\n\n${warnings.join('\n')}`);
-    } else {
-      alert('Roster imported successfully!');
     }
   };
 
@@ -1821,15 +1875,19 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       }
 
       if (parsed.factionSlug && parsed.factionSlug !== selectedFactionSlug) {
-        const newFactionName = dbFactions.find(f => f.slug === parsed.factionSlug)?.faction || parsed.factionName || parsed.factionSlug;
-        const currentFactionName = selectedFactionSlug ? (dbFactions.find(f => f.slug === selectedFactionSlug)?.faction || selectedFactionSlug) : 'None';
-        const confirmSwitch = confirm(
-          `This list is for the "${newFactionName}" faction, but your current workspace is "${currentFactionName}".\n\n` +
-          `Would you like to switch to "${newFactionName}" and import this roster?`
-        );
-
-        if (confirmSwitch) {
+        if (!selectedFactionSlug) {
           importIntoFaction(parsed, parsed.factionSlug);
+        } else {
+          const newFactionName = dbFactions.find(f => f.slug === parsed.factionSlug)?.faction || parsed.factionName || parsed.factionSlug;
+          const currentFactionName = dbFactions.find(f => f.slug === selectedFactionSlug)?.faction || selectedFactionSlug;
+          const confirmSwitch = confirm(
+            `This list is for the "${newFactionName}" faction, but your current workspace is "${currentFactionName}".\n\n` +
+            `Would you like to switch to "${newFactionName}" and import this roster?`
+          );
+
+          if (confirmSwitch) {
+            importIntoFaction(parsed, parsed.factionSlug);
+          }
         }
       } else {
         if (factionData) {
@@ -2574,31 +2632,48 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: '280px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Detachments:</span>
-                  <select
-                    value=""
-                    onChange={(e) => handleAddDetachment(e.target.value)}
-                    style={{
-                      background: 'var(--bg-tertiary)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--glass-border)',
-                      borderRadius: '8px',
-                      padding: '0.5rem 1rem',
-                      fontSize: '0.9rem',
-                      flex: 1,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="">-- Add Detachment --</option>
-                    {factionData.detachments.filter(d => !d.isCombatPatrol && !selectedDetachmentSlugs.includes(d.slug)).map(d => {
-                      const cost = d.detachmentPointsCost || 0;
-                      const overBudget = usedDetachmentPoints + cost > detachmentPointsLimit;
+                  {(() => {
+                    const availableDetachments = factionData.detachments.filter(d =>
+                      !d.isCombatPatrol &&
+                      !selectedDetachmentSlugs.includes(d.slug) &&
+                      (usedDetachmentPoints + (d.detachmentPointsCost || 0) <= detachmentPointsLimit)
+                    );
+
+                    if (availableDetachments.length === 0) {
                       return (
-                        <option key={d.slug} value={d.slug} disabled={overBudget}>
-                          {d.name} ({cost} DP){d.isFactionPack ? ' (Faction Pack)' : ''}{overBudget ? ' — over budget' : ''}
-                        </option>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontStyle: 'italic', flex: 1 }}>
+                          (Max budget reached)
+                        </span>
                       );
-                    })}
-                  </select>
+                    }
+
+                    return (
+                      <select
+                        value=""
+                        onChange={(e) => handleAddDetachment(e.target.value)}
+                        style={{
+                          background: 'var(--bg-tertiary)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--glass-border)',
+                          borderRadius: '8px',
+                          padding: '0.5rem 1rem',
+                          fontSize: '0.9rem',
+                          flex: 1,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="">-- Add Detachment --</option>
+                        {availableDetachments.map(d => {
+                          const cost = d.detachmentPointsCost || 0;
+                          return (
+                            <option key={d.slug} value={d.slug}>
+                              {d.name} ({cost} DP){d.isFactionPack ? ' (Faction Pack)' : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    );
+                  })()}
                   <span
                     title={applicableBattleSize ? `Detachment point budget for ${applicableBattleSize.name} (${applicableBattleSize.pointsLimit} pts)` : 'Detachment point budget'}
                     style={{ fontSize: '0.85rem', fontWeight: 700, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', color: usedDetachmentPoints > detachmentPointsLimit ? 'var(--accent-red)' : 'var(--accent-teal)' }}
@@ -3181,7 +3256,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   return (
                     <>
                       {rangedWeaponRows.length > 0 && (
-                        <div style={{ marginTop: '2rem' }}>
+                        <div className="print-page-break" style={{ marginTop: '2rem' }}>
                           <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
                             Ranged Weapon Summary Profiles
                           </h3>
@@ -3206,7 +3281,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                       )}
 
                       {meleeWeaponRows.length > 0 && (
-                        <div style={{ marginTop: '2rem' }}>
+                        <div className="print-page-break" style={{ marginTop: '2rem' }}>
                           <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
                             Melee Weapon Summary Profiles
                           </h3>
@@ -3593,29 +3668,37 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           )}
 
           {/* 4. Warlord switch (Characters only) */}
-          {unit.isCharacter && (
-            <label
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                fontSize: '0.8rem',
-                cursor: 'pointer',
-                color: unit.isWarlord ? 'var(--accent-gold)' : 'var(--text-secondary)',
-                userSelect: 'none',
-                marginLeft: 'auto',
-                fontWeight: unit.isWarlord ? 700 : 400
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={unit.isWarlord || false}
-                onChange={() => handleToggleWarlord(unit.id)}
-                style={{ cursor: 'pointer' }}
-              />
-              Warlord
-            </label>
-          )}
+          {unit.isCharacter && (() => {
+            const isSupremeCommander = mustBeWarlord(unit.unitSlug);
+            const rosterHasSupremeCommander = roster.some(u => u.id !== unit.id && mustBeWarlord(u.unitSlug));
+            const isWarlordDisabled = isSupremeCommander || rosterHasSupremeCommander;
+
+            return (
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontSize: '0.8rem',
+                  cursor: isWarlordDisabled ? 'not-allowed' : 'pointer',
+                  color: unit.isWarlord ? 'var(--accent-gold)' : isWarlordDisabled ? 'var(--text-muted)' : 'var(--text-secondary)',
+                  userSelect: 'none',
+                  marginLeft: 'auto',
+                  fontWeight: unit.isWarlord ? 700 : 400
+                }}
+                title={isSupremeCommander ? "Supreme Commander must be Warlord" : rosterHasSupremeCommander ? "Army contains a Supreme Commander who must be Warlord" : undefined}
+              >
+                <input
+                  type="checkbox"
+                  checked={unit.isWarlord || false}
+                  disabled={isWarlordDisabled}
+                  onChange={() => handleToggleWarlord(unit.id)}
+                  style={{ cursor: isWarlordDisabled ? 'not-allowed' : 'pointer' }}
+                />
+                Warlord {isSupremeCommander && <span style={{ fontSize: '0.7rem', color: 'var(--accent-teal)' }}>(Supreme Commander)</span>}
+              </label>
+            );
+          })()}
 
           {/* 5. Split Squad switch (eligible squads only) */}
           {canUnitSplit(unit.name, unit.modelsCount, matchedCatalog?.appDatasheet?.abilities || [], matchedCatalog?.appDatasheet?.rules || []) && (
@@ -3686,45 +3769,59 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           if (!hasDisplayableWargear) return null;
 
           const renderWargearChoiceSet = (set: WargearChoiceSet, totalModelCount: number, model: Model, setIdx: number) => {
-            const isSingleChoiceOptional = set.choices.length === 1;
-            const isSingleChoiceSelect = set.choices.length > 1 && set.limit === 1 && totalModelCount === 1;
+            const nonEmptyChoices = set.choices.filter(c => c.items.length > 0);
+            const isUnrestrictedCheckboxList = !set.allowDuplicates && set.limit >= nonEmptyChoices.length;
+            const isDropdownSelect = nonEmptyChoices.length > 1 && set.limit === 1 && totalModelCount === 1;
+            const isCheckboxMultiSelect = set.limit > 1 && !set.allowDuplicates && set.limit < nonEmptyChoices.length;
 
-            if (isSingleChoiceOptional) {
-              const choice = set.choices[0];
-              const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
-              const isChecked = (unit.wargearCounts?.[choice.id] || 0) > 0;
+            if (isUnrestrictedCheckboxList) {
               return (
-                <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                  <label
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                      fontSize: '0.8rem',
-                      color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      userSelect: 'none'
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={(e) => {
-                        handleWargearCountChange(unit.id, choice.id, e.target.checked ? 1 : 0);
-                      }}
-                      style={{ cursor: 'pointer' }}
-                    />
-                    {label}
-                  </label>
+                <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                  {nonEmptyChoices.map((choice) => {
+                    const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                    const isChecked = (unit.wargearCounts?.[choice.id] || 0) > 0;
+                    return (
+                      <label
+                        key={choice.id}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          fontSize: '0.8rem',
+                          color: isChecked ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          cursor: 'pointer',
+                          userSelect: 'none'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            handleWargearCountChange(unit.id, choice.id, e.target.checked ? 1 : 0);
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        />
+                        {label}
+                      </label>
+                    );
+                  })}
                 </div>
               );
-            } else if (isSingleChoiceSelect) {
+            } else if (isDropdownSelect) {
+              const defaultChoice = set.choices.find(choice =>
+                choice.items.length > 0 &&
+                choice.items.every(item => model.weapons?.some(w => w.name === item.name))
+              );
+
+              const otherChoices = set.choices.filter(c => c.id !== defaultChoice?.id);
               const selectedChoiceId = set.choices.find(c => (unit.wargearCounts?.[c.id] || 0) > 0)?.id || '';
+
+              const defaultLabel = defaultChoice
+                ? `-- Default Loadout (${defaultChoice.items.map(item => item.name).join(', ')}) --`
+                : '-- Default Loadout (None) --';
+
               return (
                 <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                    Choose 1 option (Limit {set.limit})
-                  </span>
                   <select
                     value={selectedChoiceId}
                     onChange={(e) => {
@@ -3753,16 +3850,65 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                       maxWidth: '400px'
                     }}
                   >
-                    <option value="">-- Default Loadout --</option>
-                    {set.choices.map((choice, cidx) => {
+                    <option value="">{defaultLabel}</option>
+                    {otherChoices.map((choice, cidx) => {
                       const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                      const optionLabel = label || "-- None --";
                       return (
                         <option key={choice.id || cidx} value={choice.id}>
-                          {label}
+                          {optionLabel}
                         </option>
                       );
                     })}
                   </select>
+                </div>
+              );
+            } else if (isCheckboxMultiSelect) {
+              const maxAllowed = set.limit * (set.miniatureId ? totalModelCount : 1);
+              const setAllocatedCount = set.choices.reduce((sum, choice) => sum + (unit.wargearCounts?.[choice.id] || 0), 0);
+              const reachedLimit = setAllocatedCount >= maxAllowed;
+
+              return (
+                <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', background: 'rgba(255,255,255,0.02)', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    Select up to {maxAllowed} option{maxAllowed > 1 ? 's' : ''} (Selected: {setAllocatedCount}/{maxAllowed})
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                    {set.choices.map((choice) => {
+                      const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                      if (!label) return null; // skip empty/default slots in multi-select checkbox list
+                      
+                      const isChecked = (unit.wargearCounts?.[choice.id] || 0) > 0;
+                      const isDisabled = !isChecked && reachedLimit;
+
+                      return (
+                        <label
+                          key={choice.id}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            fontSize: '0.8rem',
+                            color: isDisabled ? 'var(--text-muted)' : isChecked ? 'var(--text-primary)' : 'var(--text-secondary)',
+                            cursor: isDisabled ? 'not-allowed' : 'pointer',
+                            userSelect: 'none',
+                            opacity: isDisabled ? 0.5 : 1
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={isDisabled}
+                            onChange={(e) => {
+                              handleWargearCountChange(unit.id, choice.id, e.target.checked ? 1 : 0);
+                            }}
+                            style={{ cursor: isDisabled ? 'not-allowed' : 'pointer' }}
+                          />
+                          {label}
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             } else {
