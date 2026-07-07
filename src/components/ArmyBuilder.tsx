@@ -44,6 +44,32 @@ interface ParsedRoster {
   units: ParsedRosterUnit[];
 }
 
+interface UnresolvedUnit {
+  index: number;
+  originalName: string;
+  originalPoints: number;
+  originalEnhancementName?: string;
+  rawModelCounts: { name: string; count: number }[];
+  isWarlord: boolean;
+  sourceId?: string;
+  attachedToSourceId?: string;
+  bestGuessSlug: string | null;
+  bestGuessEnhancementName?: string;
+  candidateUnits: { name: string; slug: string }[];
+  candidateEnhancements: string[];
+}
+
+interface ImportResolution {
+  parsedRoster: ParsedRoster;
+  faction: MergedFaction;
+  unresolvedUnits: UnresolvedUnit[];
+  resolvedUnits: Record<number, {
+    unitSlug: string | null; // null means skip
+    enhancementName?: string;
+  }>;
+}
+
+
 function findBestCostIndex(costs: { points: number; models: number }[], parsedPoints: number, parsedModels: number): number {
   if (!costs || costs.length === 0) return 0;
   if (costs.length === 1) return 0;
@@ -1298,6 +1324,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // Import states
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [importText, setImportText] = useState<string>('');
+  const [importResolution, setImportResolution] = useState<ImportResolution | null>(null);
 
   // Rosters saved inside the uploaded companion-app database (may be empty)
   const [dbRosters, setDbRosters] = useState<SavedDbRosterSummary[]>([]);
@@ -1414,7 +1441,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     return leadsNormalized.includes(normBodyguardName);
   };
 
-  const applyParsedRoster = (parsed: ParsedRoster, faction: MergedFaction) => {
+  const applyParsedRoster = (
+    parsed: ParsedRoster,
+    faction: MergedFaction,
+    resolvedMapping?: Record<number, { unitSlug: string | null; enhancementName?: string }>
+  ) => {
     let matchedDetachmentSlug = null;
     if (parsed.detachmentName) {
       const normDetName = normalizeName(parsed.detachmentName);
@@ -1439,15 +1470,26 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     // Allied units (e.g. Agents of the Imperium) live in a separate collection.
     const matchableUnits = [...faction.units, ...(faction.alliedUnits || [])];
 
-    for (const parsedUnit of parsed.units) {
-      const normParsedName = normalizeName(parsedUnit.name);
+    for (let i = 0; i < parsed.units.length; i++) {
+      const parsedUnit = parsed.units[i];
 
-      let matchedUnit = matchableUnits.find(u => normalizeName(u.name) === normParsedName);
-      if (!matchedUnit) {
-        matchedUnit = matchableUnits.find(u => {
-          const normCatalog = normalizeName(u.name);
-          return normCatalog.includes(normParsedName) || normParsedName.includes(normCatalog);
-        });
+      let matchedUnit: MergedUnit | null;
+      if (resolvedMapping && resolvedMapping[i]) {
+        const resolved = resolvedMapping[i];
+        if (resolved.unitSlug === null) {
+          continue; // User skipped this unit
+        }
+        matchedUnit = matchableUnits.find(u => u.slug === resolved.unitSlug) || null;
+      } else {
+        const normParsedName = normalizeName(parsedUnit.name);
+        let tempMatch = matchableUnits.find(u => normalizeName(u.name) === normParsedName);
+        if (!tempMatch) {
+          tempMatch = matchableUnits.find(u => {
+            const normCatalog = normalizeName(u.name);
+            return normCatalog.includes(normParsedName) || normParsedName.includes(normCatalog);
+          });
+        }
+        matchedUnit = tempMatch || null;
       }
 
       if (!matchedUnit) {
@@ -1462,17 +1504,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
       const parsedModelsCount = parsedUnit.modelsCount ?? parsedUnit.rawModelCounts.reduce((sum, item) => sum + item.count, 0);
 
-      const costs: { points: number; models: number }[] = [];
-      if (matchedUnit.appDatasheet?.compositions) {
-        matchedUnit.appDatasheet.compositions.forEach(c => {
-          // Find the primary model count for this composition (sum of mins)
-          const modelCount = c.models.reduce((sum, m) => sum + m.min, 0);
-          costs.push({
-            points: c.points || 0,
-            models: modelCount || 1
-          });
-        });
-      }
+      // Use the standard getDatasheetCosts helper to obtain consistent composition points and models counts
+      const selectedDetachmentId = matchedDetachmentSlug ? faction.detachments.find(d => d.slug === matchedDetachmentSlug)?.id : null;
+      const costs = getDatasheetCosts(matchedUnit.appDatasheet, faction.factionKeywordIds || [], selectedDetachmentId, faction.slug);
 
       const selectedCostIndex = findBestCostIndex(costs, parsedUnit.points, parsedModelsCount);
 
@@ -1487,9 +1521,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       let enhancementPoints = 0;
       let validEnhancementName = undefined;
 
-      if (parsedUnit.enhancementName && matchedDetachmentSlug) {
+      const targetEnhancementName = (resolvedMapping && resolvedMapping[i])
+        ? resolvedMapping[i].enhancementName
+        : parsedUnit.enhancementName;
+
+      if (targetEnhancementName && matchedDetachmentSlug) {
         const matchedDet = faction.detachments.find(d => d.slug === matchedDetachmentSlug);
-        const normEnhName = normalizeName(parsedUnit.enhancementName);
+        const normEnhName = normalizeName(targetEnhancementName);
         const matchedEnh = matchedDet?.enhancements.find(e =>
           normalizeName(e.name) === normEnhName ||
           normalizeName(e.name).includes(normEnhName) ||
@@ -1499,7 +1537,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           validEnhancementName = matchedEnh.name;
           enhancementPoints = matchedEnh.pointsCost || 0;
         } else {
-          warnings.push(`Enhancement "${parsedUnit.enhancementName}" not found in detachment "${matchedDet?.name || matchedDetachmentSlug}".`);
+          warnings.push(`Enhancement "${targetEnhancementName}" not found in detachment "${matchedDet?.name || matchedDetachmentSlug}".`);
         }
       }
 
@@ -1607,15 +1645,119 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }
   };
 
+  // Match parsed roster units against faction catalog, triggering interactive resolution if needed
+  const startImportOrResolve = (parsed: ParsedRoster, faction: MergedFaction) => {
+    let matchedDetachmentSlug = null;
+    if (parsed.detachmentName) {
+      const normDetName = normalizeName(parsed.detachmentName);
+      const matchedDet = faction.detachments.find(d => normalizeName(d.name) === normDetName);
+      if (matchedDet) {
+        matchedDetachmentSlug = matchedDet.slug;
+      } else {
+        const fuzzyMatched = faction.detachments.find(d =>
+          normalizeName(d.name).includes(normDetName) || normDetName.includes(normalizeName(d.name))
+        );
+        if (fuzzyMatched) {
+          matchedDetachmentSlug = fuzzyMatched.slug;
+        }
+      }
+    }
+
+    const matchableUnits = [...faction.units, ...(faction.alliedUnits || [])];
+    const unresolvedUnits: UnresolvedUnit[] = [];
+    const initialResolvedUnits: Record<number, { unitSlug: string | null; enhancementName?: string }> = {};
+
+    for (let i = 0; i < parsed.units.length; i++) {
+      const parsedUnit = parsed.units[i];
+      const normParsedName = normalizeName(parsedUnit.name);
+
+      let matchedUnit = matchableUnits.find(u => normalizeName(u.name) === normParsedName);
+      const hasExactName = !!matchedUnit;
+
+      if (!matchedUnit) {
+        matchedUnit = matchableUnits.find(u => {
+          const normCatalog = normalizeName(u.name);
+          return normCatalog.includes(normParsedName) || normParsedName.includes(normCatalog);
+        });
+      }
+
+      let hasCleanEnhancement = true;
+      let matchedEnhancementName: string | undefined = undefined;
+
+      if (parsedUnit.enhancementName && matchedDetachmentSlug) {
+        const matchedDet = faction.detachments.find(d => d.slug === matchedDetachmentSlug);
+        const normEnhName = normalizeName(parsedUnit.enhancementName);
+        const matchedEnh = matchedDet?.enhancements.find(e =>
+          normalizeName(e.name) === normEnhName ||
+          normalizeName(e.name).includes(normEnhName) ||
+          normEnhName.includes(normalizeName(e.name))
+        );
+        if (matchedEnh) {
+          matchedEnhancementName = matchedEnh.name;
+        } else {
+          hasCleanEnhancement = false;
+        }
+      }
+
+      const isCleanMatch = hasExactName && hasCleanEnhancement;
+
+      if (!isCleanMatch) {
+        const fuzzyCandidates = matchableUnits.filter(u => {
+          const normCatalog = normalizeName(u.name);
+          return normCatalog.includes(normParsedName) || normParsedName.includes(normCatalog);
+        });
+        const otherCandidates = matchableUnits.filter(u => !fuzzyCandidates.includes(u));
+        const sortedCandidates = [...fuzzyCandidates, ...otherCandidates].map(u => ({ name: u.name, slug: u.slug }));
+
+        const candidateEnhancements = matchedDetachmentSlug
+          ? ((faction.detachments.find(d => d.slug === matchedDetachmentSlug)?.enhancements || []).map(e => e.name))
+          : faction.detachments.flatMap(d => d.enhancements.map(e => e.name));
+
+        unresolvedUnits.push({
+          index: i,
+          originalName: parsedUnit.name,
+          originalPoints: parsedUnit.points,
+          originalEnhancementName: parsedUnit.enhancementName,
+          rawModelCounts: parsedUnit.rawModelCounts,
+          isWarlord: parsedUnit.isWarlord,
+          sourceId: parsedUnit.sourceId,
+          attachedToSourceId: parsedUnit.attachedToSourceId,
+          bestGuessSlug: matchedUnit ? matchedUnit.slug : null,
+          bestGuessEnhancementName: matchedEnhancementName,
+          candidateUnits: sortedCandidates,
+          candidateEnhancements
+        });
+
+        initialResolvedUnits[i] = {
+          unitSlug: matchedUnit ? matchedUnit.slug : (sortedCandidates[0]?.slug || null),
+          enhancementName: matchedEnhancementName
+        };
+      }
+    }
+
+    if (unresolvedUnits.length === 0) {
+      applyParsedRoster(parsed, faction);
+      setIsImportModalOpen(false);
+      setImportText('');
+      setImportResolution(null);
+    } else {
+      setImportResolution({
+        parsedRoster: parsed,
+        faction,
+        unresolvedUnits,
+        resolvedUnits: initialResolvedUnits
+      });
+      setIsImportModalOpen(true);
+    }
+  };
+
   // Switch faction and apply an imported roster once its data is loaded.
   const importIntoFaction = async (parsed: ParsedRoster, slug: string) => {
     setSelectedFactionSlug(slug);
-    setIsImportModalOpen(false);
-    setImportText('');
     try {
       const data = await loadAndMergeFaction(slug);
       if (data) {
-        applyParsedRoster(parsed, data);
+        startImportOrResolve(parsed, data);
       }
     } catch (err) {
       console.error('Failed to load faction data for import:', err);
@@ -1640,9 +1782,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       }
 
       if (parsed.factionSlug === selectedFactionSlug && factionData) {
-        applyParsedRoster(parsed, factionData);
-        setIsImportModalOpen(false);
-        setImportText('');
+        startImportOrResolve(parsed, factionData);
       } else {
         await importIntoFaction(parsed, parsed.factionSlug!);
       }
@@ -1678,9 +1818,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         }
       } else {
         if (factionData) {
-          applyParsedRoster(parsed, factionData);
-          setIsImportModalOpen(false);
-          setImportText('');
+          startImportOrResolve(parsed, factionData);
         } else {
           if (parsed.factionSlug) {
             importIntoFaction(parsed, parsed.factionSlug);
@@ -3750,6 +3888,195 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   }
 
   function renderImportModal() {
+    if (importResolution) {
+      const handleSelectUnitSlug = (index: number, slug: string | null) => {
+        setImportResolution(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            resolvedUnits: {
+              ...prev.resolvedUnits,
+              [index]: {
+                ...prev.resolvedUnits[index],
+                unitSlug: slug
+              }
+            }
+          };
+        });
+      };
+
+      const handleSelectEnhancement = (index: number, enhancementName: string | undefined) => {
+        setImportResolution(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            resolvedUnits: {
+              ...prev.resolvedUnits,
+              [index]: {
+                ...prev.resolvedUnits[index],
+                enhancementName: enhancementName || undefined
+              }
+            }
+          };
+        });
+      };
+
+      const handleCompleteImport = () => {
+        applyParsedRoster(importResolution.parsedRoster, importResolution.faction, importResolution.resolvedUnits);
+        setIsImportModalOpen(false);
+        setImportText('');
+        setImportResolution(null);
+      };
+
+      return (
+        <div className="overlay" style={{ display: 'flex', zIndex: 1000 }}>
+          <div className="print-preview-modal" style={{ maxWidth: '650px', height: 'auto', maxHeight: '95vh', margin: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div className="modal-header" style={{ alignItems: 'center', background: 'var(--bg-secondary)', padding: '1rem 1.5rem', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between' }}>
+              <div>
+                <h3 style={{ textTransform: 'uppercase', color: 'var(--text-primary)', fontSize: '1.2rem', margin: 0 }}>Resolve Imported Matches</h3>
+                <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  Confirm or correct unit matches to database catalog entries.
+                </p>
+              </div>
+              <button
+                className="button-outline"
+                onClick={() => {
+                  setImportResolution(null);
+                  setIsImportModalOpen(false);
+                }}
+                style={{ fontSize: '0.85rem', padding: '0.3rem 0.6rem' }}
+              >
+                Cancel
+              </button>
+            </div>
+            
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowY: 'auto', flex: 1, background: 'var(--bg-primary)' }}>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'rgba(20, 184, 166, 0.05)', border: '1px solid rgba(20, 184, 166, 0.2)', borderRadius: '8px', padding: '0.75rem' }}>
+                💡 <strong>Tip:</strong> Units not listed here matched cleanly. Misspelled or ambiguous names are resolved below. Wargear defaults will be applied where no wargear block is defined.
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {importResolution.unresolvedUnits.map((unresolved) => {
+                  const selection = importResolution.resolvedUnits[unresolved.index] || { unitSlug: null };
+                  return (
+                    <div
+                      key={unresolved.index}
+                      style={{
+                        padding: '1rem',
+                        background: 'var(--bg-tertiary)',
+                        border: '1px solid var(--glass-border)',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.75rem',
+                        textAlign: 'left'
+                      }}
+                    >
+                      {/* Original imported text representation */}
+                      <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.15rem' }}>
+                          Imported text line
+                        </span>
+                        <strong style={{ fontSize: '0.9rem', color: 'var(--accent-gold)' }}>
+                          {unresolved.originalName} ({unresolved.originalPoints} pts)
+                        </strong>
+                        {unresolved.originalEnhancementName && (
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <span>↳ Enhancement:</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', background: 'rgba(255, 255, 255, 0.05)', padding: '1px 4px', borderRadius: '3px' }}>
+                              {unresolved.originalEnhancementName}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Dropdown for unit selection */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                          Map to Database Unit:
+                        </label>
+                        <select
+                          value={selection.unitSlug || ''}
+                          onChange={(e) => handleSelectUnitSlug(unresolved.index, e.target.value || null)}
+                          style={{
+                            background: 'var(--bg-primary)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: '6px',
+                            padding: '0.4rem 0.6rem',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="">-- Skip Unit (Do Not Import) --</option>
+                          {unresolved.candidateUnits.map(cu => (
+                            <option key={cu.slug} value={cu.slug}>
+                              {cu.name} {cu.slug === unresolved.bestGuessSlug ? ' (Best Guess)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Dropdown for enhancement selection (if applicable) */}
+                      {unresolved.originalEnhancementName && selection.unitSlug !== null && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                            Map to Enhancement:
+                          </label>
+                          <select
+                            value={selection.enhancementName || ''}
+                            onChange={(e) => handleSelectEnhancement(unresolved.index, e.target.value || undefined)}
+                            style={{
+                              background: 'var(--bg-primary)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--glass-border)',
+                              borderRadius: '6px',
+                              padding: '0.4rem 0.6rem',
+                              fontSize: '0.85rem',
+                              cursor: 'pointer',
+                              outline: 'none'
+                            }}
+                          >
+                            <option value="">-- No Enhancement --</option>
+                            {unresolved.candidateEnhancements.map(eName => (
+                              <option key={eName} value={eName}>
+                                {eName} {eName === unresolved.bestGuessEnhancementName ? ' (Best Guess)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem 1.5rem', background: 'var(--bg-secondary)', borderTop: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                className="button-outline"
+                onClick={() => {
+                  setImportResolution(null);
+                  setIsImportModalOpen(false);
+                }}
+                style={{ fontSize: '0.85rem', padding: '0.5rem 1.25rem' }}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={handleCompleteImport}
+                style={{ fontSize: '0.85rem', padding: '0.5rem 1.5rem' }}
+              >
+                Confirm & Complete Import
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="overlay" style={{ display: 'flex', zIndex: 1000 }}>
         <div className="print-preview-modal" style={{ maxWidth: '600px', height: 'auto', maxHeight: '95vh', margin: 'auto' }}>
