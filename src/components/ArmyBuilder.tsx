@@ -18,7 +18,7 @@ import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/
 import type { MergedFaction } from '../utils/dataMapper';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
-import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet } from '../types/data';
+import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet, AppEnhancement } from '../types/data';
 
 
 interface ParsedRosterUnit {
@@ -582,6 +582,7 @@ function generateRosterText(
       const wargear = getRosterUnitWargear(u, factionData);
       const wargearSuffix = wargear.length > 0 ? ` (${wargear.join(', ')})` : '';
       const actualPoints = getUnitActualPoints(u, roster, factionData);
+      const enhSuffix = u.enhancementName ? ` - ${u.enhancementName}` : '';
       lines.push(`UNIT ${idx + 1}: ${u.name}${splitTag}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${actualPoints + (u.enhancementPoints || 0)} pts]`);
     });
 
@@ -993,8 +994,8 @@ function getPrintableRoster(
   bodyguards.forEach(bg => {
     const attached = collapsedUnits.filter(cu => cu.unit.attachedToId === bg.id);
     if (attached.length > 0) {
-      const leaders: typeof collapsedUnits[] = [];
-      const supports: typeof collapsedUnits[] = [];
+      const leaders: typeof collapsedUnits = [];
+      const supports: typeof collapsedUnits = [];
 
       attached.forEach(cu => {
         const cat = factionData?.units.find(u => u.slug === cu.unit.unitSlug) || (factionData?.alliedUnits && factionData.alliedUnits.find(u => u.slug === cu.unit.unitSlug));
@@ -1110,7 +1111,7 @@ function getPrintableCardsRoster(
 
     const parts = [
       c.unitSlug,
-      c.virtualModelsCount.toString(),
+      (c.virtualModelsCount !== undefined ? c.virtualModelsCount : c.modelsCount).toString(),
       c.enhancementName || 'no-enh',
       c.isWarlord ? 'warlord' : 'no-warlord',
       attachmentKey,
