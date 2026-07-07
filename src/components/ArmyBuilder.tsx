@@ -321,7 +321,7 @@ function parseOfficialAppExport(text: string, dbFactions: { faction: string; slu
 
   let headerIndex = -1;
   const signatureIndex = lines.findIndex(l => l.toUpperCase().includes('EXPORTED FROM THE WARHAMMER'));
-  const pointsRegex = /\(\s*(\d[\d\s\u00A0,.]*)\s*points?\s*\)/i;
+  const pointsRegex = /\(\s*(\d[\d\s\u00A0,.]*)\s*(?:points?|pts)?\s*\)/i;
 
   if (signatureIndex !== -1 && signatureIndex + 1 < lines.length) {
     headerIndex = signatureIndex + 1;
@@ -419,7 +419,7 @@ function parseOfficialAppExport(text: string, dbFactions: { faction: string; slu
         }
       }
     } else {
-      const unitMatch = line.match(/^(.+?)\s*\(\s*(\d[\d\s\u00A0,.]*)\s*points?\s*\)/i);
+      const unitMatch = line.match(/^(.+?)\s*\(\s*(\d[\d\s\u00A0,.]*)\s*(?:points?|pts)?\s*\)/i);
       if (unitMatch) {
         if (currentUnit) {
           parsed.units.push(currentUnit);
@@ -1446,22 +1446,17 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     faction: MergedFaction,
     resolvedMapping?: Record<number, { unitSlug: string | null; enhancementName?: string }>
   ) => {
-    let matchedDetachmentSlug = null;
+    const matchedDetachmentSlugs: string[] = [];
     if (parsed.detachmentName) {
       const normDetName = normalizeName(parsed.detachmentName);
-      const matchedDet = faction.detachments.find(d => normalizeName(d.name) === normDetName);
-      if (matchedDet) {
-        matchedDetachmentSlug = matchedDet.slug;
-      } else {
-        const fuzzyMatched = faction.detachments.find(d =>
-          normalizeName(d.name).includes(normDetName) || normDetName.includes(normalizeName(d.name))
-        );
-        if (fuzzyMatched) {
-          matchedDetachmentSlug = fuzzyMatched.slug;
+      faction.detachments.forEach(d => {
+        const normDName = normalizeName(d.name);
+        if (normDetName.includes(normDName) || normDName.includes(normDetName)) {
+          matchedDetachmentSlugs.push(d.slug);
         }
-      }
+      });
     }
-    setSelectedDetachmentSlugs(matchedDetachmentSlug ? [matchedDetachmentSlug] : []);
+    setSelectedDetachmentSlugs(matchedDetachmentSlugs);
 
     const newRosterUnits: RosterUnit[] = [];
     const warnings: string[] = [];
@@ -1481,7 +1476,12 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         }
         matchedUnit = matchableUnits.find(u => u.slug === resolved.unitSlug) || null;
       } else {
-        const normParsedName = normalizeName(parsedUnit.name);
+        let cleanImportName = parsedUnit.name;
+        const leadingCountMatch = cleanImportName.match(/^(\d+)\s*x\s*(.+)$/i);
+        if (leadingCountMatch) {
+          cleanImportName = leadingCountMatch[2].trim();
+        }
+        const normParsedName = normalizeName(cleanImportName);
         let tempMatch = matchableUnits.find(u => normalizeName(u.name) === normParsedName);
         if (!tempMatch) {
           tempMatch = matchableUnits.find(u => {
@@ -1505,7 +1505,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       const parsedModelsCount = parsedUnit.modelsCount ?? parsedUnit.rawModelCounts.reduce((sum, item) => sum + item.count, 0);
 
       // Use the standard getDatasheetCosts helper to obtain consistent composition points and models counts
-      const selectedDetachmentId = matchedDetachmentSlug ? faction.detachments.find(d => d.slug === matchedDetachmentSlug)?.id : null;
+      const firstDetachmentSlug = matchedDetachmentSlugs[0];
+      const selectedDetachmentId = firstDetachmentSlug ? faction.detachments.find(d => d.slug === firstDetachmentSlug)?.id : null;
       const costs = getDatasheetCosts(matchedUnit.appDatasheet, faction.factionKeywordIds || [], selectedDetachmentId, faction.slug);
 
       const selectedCostIndex = findBestCostIndex(costs, parsedUnit.points, parsedModelsCount);
@@ -1525,19 +1526,23 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         ? resolvedMapping[i].enhancementName
         : parsedUnit.enhancementName;
 
-      if (targetEnhancementName && matchedDetachmentSlug) {
-        const matchedDet = faction.detachments.find(d => d.slug === matchedDetachmentSlug);
-        const normEnhName = normalizeName(targetEnhancementName);
-        const matchedEnh = matchedDet?.enhancements.find(e =>
-          normalizeName(e.name) === normEnhName ||
-          normalizeName(e.name).includes(normEnhName) ||
-          normEnhName.includes(normalizeName(e.name))
-        );
+      if (targetEnhancementName && matchedDetachmentSlugs.length > 0) {
+        const matchedEnh = faction.detachments
+          .filter(d => matchedDetachmentSlugs.includes(d.slug))
+          .flatMap(d => d.enhancements)
+          .find(e => {
+            const normEnhName = normalizeName(targetEnhancementName);
+            return (
+              normalizeName(e.name) === normEnhName ||
+              normalizeName(e.name).includes(normEnhName) ||
+              normEnhName.includes(normalizeName(e.name))
+            );
+          });
         if (matchedEnh) {
           validEnhancementName = matchedEnh.name;
           enhancementPoints = matchedEnh.pointsCost || 0;
         } else {
-          warnings.push(`Enhancement "${targetEnhancementName}" not found in detachment "${matchedDet?.name || matchedDetachmentSlug}".`);
+          warnings.push(`Enhancement "${targetEnhancementName}" not found in selected detachments.`);
         }
       }
 
@@ -1647,20 +1652,15 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
   // Match parsed roster units against faction catalog, triggering interactive resolution if needed
   const startImportOrResolve = (parsed: ParsedRoster, faction: MergedFaction) => {
-    let matchedDetachmentSlug = null;
+    const matchedDetachmentSlugs: string[] = [];
     if (parsed.detachmentName) {
       const normDetName = normalizeName(parsed.detachmentName);
-      const matchedDet = faction.detachments.find(d => normalizeName(d.name) === normDetName);
-      if (matchedDet) {
-        matchedDetachmentSlug = matchedDet.slug;
-      } else {
-        const fuzzyMatched = faction.detachments.find(d =>
-          normalizeName(d.name).includes(normDetName) || normDetName.includes(normalizeName(d.name))
-        );
-        if (fuzzyMatched) {
-          matchedDetachmentSlug = fuzzyMatched.slug;
+      faction.detachments.forEach(d => {
+        const normDName = normalizeName(d.name);
+        if (normDetName.includes(normDName) || normDName.includes(normDetName)) {
+          matchedDetachmentSlugs.push(d.slug);
         }
-      }
+      });
     }
 
     const matchableUnits = [...faction.units, ...(faction.alliedUnits || [])];
@@ -1669,7 +1669,12 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     for (let i = 0; i < parsed.units.length; i++) {
       const parsedUnit = parsed.units[i];
-      const normParsedName = normalizeName(parsedUnit.name);
+      let cleanImportName = parsedUnit.name;
+      const leadingCountMatch = cleanImportName.match(/^(\d+)\s*x\s*(.+)$/i);
+      if (leadingCountMatch) {
+        cleanImportName = leadingCountMatch[2].trim();
+      }
+      const normParsedName = normalizeName(cleanImportName);
 
       let matchedUnit = matchableUnits.find(u => normalizeName(u.name) === normParsedName);
       const hasExactName = !!matchedUnit;
@@ -1684,14 +1689,18 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       let hasCleanEnhancement = true;
       let matchedEnhancementName: string | undefined = undefined;
 
-      if (parsedUnit.enhancementName && matchedDetachmentSlug) {
-        const matchedDet = faction.detachments.find(d => d.slug === matchedDetachmentSlug);
-        const normEnhName = normalizeName(parsedUnit.enhancementName);
-        const matchedEnh = matchedDet?.enhancements.find(e =>
-          normalizeName(e.name) === normEnhName ||
-          normalizeName(e.name).includes(normEnhName) ||
-          normEnhName.includes(normalizeName(e.name))
-        );
+      if (parsedUnit.enhancementName && matchedDetachmentSlugs.length > 0) {
+        const matchedEnh = faction.detachments
+          .filter(d => matchedDetachmentSlugs.includes(d.slug))
+          .flatMap(d => d.enhancements)
+          .find(e => {
+            const normEnhName = normalizeName(parsedUnit.enhancementName!);
+            return (
+              normalizeName(e.name) === normEnhName ||
+              normalizeName(e.name).includes(normEnhName) ||
+              normEnhName.includes(normalizeName(e.name))
+            );
+          });
         if (matchedEnh) {
           matchedEnhancementName = matchedEnh.name;
         } else {
@@ -1707,10 +1716,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           return normCatalog.includes(normParsedName) || normParsedName.includes(normCatalog);
         });
         const otherCandidates = matchableUnits.filter(u => !fuzzyCandidates.includes(u));
-        const sortedCandidates = [...fuzzyCandidates, ...otherCandidates].map(u => ({ name: u.name, slug: u.slug }));
+        const sortedCandidates = [...fuzzyCandidates, ...otherCandidates]
+          .map(u => ({ name: u.name, slug: u.slug }))
+          .sort((a, b) => {
+            const lenDiffA = Math.abs(normalizeName(a.name).length - normParsedName.length);
+            const lenDiffB = Math.abs(normalizeName(b.name).length - normParsedName.length);
+            return lenDiffA - lenDiffB;
+          });
 
-        const candidateEnhancements = matchedDetachmentSlug
-          ? ((faction.detachments.find(d => d.slug === matchedDetachmentSlug)?.enhancements || []).map(e => e.name))
+        const candidateEnhancements = matchedDetachmentSlugs.length > 0
+          ? faction.detachments.filter(d => matchedDetachmentSlugs.includes(d.slug)).flatMap(d => d.enhancements.map(e => e.name))
           : faction.detachments.flatMap(d => d.enhancements.map(e => e.name));
 
         unresolvedUnits.push({
