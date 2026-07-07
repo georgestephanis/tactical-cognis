@@ -36,6 +36,7 @@ Located in [src/utils/db.ts](https://github.com/georgestephanis/tactical-cognis/
   - `invulnerable_save`: Combines ranged and melee saves, prioritizing miniature-specific overrides.
   - `datasheet_damage`: Loads damaged stat bracket rules.
   - `unit_composition` & `unit_composition_miniature`: Extracts sizing counts and points cost levels.
+  - `datasheet_points_step`: Loads stepped points pricing rules for duplicate units.
   - `datasheet_datasheet_ability` & `datasheet_ability`: Resolves core, faction, and datasheet rules.
   - `datasheet_bodyguard_group`: Resolves character lead and bodyguard capabilities.
   - `wargear_item_profile` & `base_miniature_loadout`: Maps baseline weapons configurations.

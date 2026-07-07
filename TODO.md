@@ -44,4 +44,9 @@ This document outlines the assessment and plan for leveraging unused database ta
 * **`roster*`** ✅ Saved-roster import: the Import modal lists army lists found in the uploaded companion-app DB (`getSavedDbRosters`/`getDbRosterDetail`) and imports them with exact units, model counts, wargear, enhancements, warlord, allies, and leader attachments.
 * **`enhancement` schema columns & `enhancement_*` constraints** ✅ Mapped `isIncludedInEnhancementLimit`, `isEquipableByNonCharacterUnit`, `duplicateLimit` columns along with keyword and wargear constraint tables to validate enhancement eligibility.
 * **`datasheet_points_step`** ✅ Mapped stepped pricing for duplicate units (e.g. Stompa, Big Mek Dakkarig) to dynamically adjust point costs for duplicate units.
+* **`Supreme Commander` & `isWarlord`** ✅ Automatic warlord enforcement for units possessing the Supreme Commander ability.
+* **`Attached Unit` grouping** ✅ Text import boundary parsing of Attached Unit blocks, automatically grouping characters and bodyguard squads on list load.
+* **`Interactive resolution`** ✅ Modal resolver for unresolved catalog units and enhancements during text list imports, with candidate sorting based on name-length proximity.
+* **`Wargear Layout Logic`** ✅ Contextual selection elements (standalone checkboxes, dropdown selectors, multi-select checkboxes, and adjusters) determined automatically from SQLite limits and duplicate/exclusivity rules.
+* **`Print Page Breaks`** ✅ Print-preview page-break utilities to divide tabular roster and profile summary sheets across separate pages.
 
