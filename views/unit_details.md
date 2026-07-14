@@ -14,7 +14,7 @@ The **Unit Details Modal** is a full-screen overlay component that provides deep
 ## 🛠️ Methods & Rendering Logic
 
 ### 1. View Toggling
-- **Standard Datasheet Mode (`datasheet`):** Recreates the official datasheet layout. Displays model stats (M, T, Sv, Inv, W, Ld, OC), core and faction abilities, weapons lists with standard statlines (Range, A, BS/WS, S, AP, D), composition sizes, points costs, and faction keywords.
+- **Standard Datasheet Mode (`datasheet`):** Recreates the official datasheet layout. Displays model stats (M, T, Sv, Inv, W, Ld, OC), core and faction abilities, weapons lists with standard statlines (Range, A, BS/WS, S, AP, D), composition sizes, points costs, and faction keywords. The **Wargear Options** section also shows the official "you may replace X with Y" prose from the DB (`wargear_rule.rulesText`, exposed as `datasheet.wargearRules`) above the structured choice list.
 - **Tactical Simulator Mode (`tactical`):** An interactive playground. Compiles all weapons from the unit into a selector dropdown. The user selects a weapon profile and applies custom battle modifiers (re-rolls, plus-to-hit/wound adjustments) to run combat math.
 
 ### 2. Mathhammer Calculations

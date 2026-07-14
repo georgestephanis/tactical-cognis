@@ -1,5 +1,27 @@
 # Unused Database Data — Audit
 
+> **Integration status (2026-07-14):** all five recommended priority items below
+> have since been integrated. The Army Builder now reads and enforces:
+> 1. **Excluded datasheets** — `getExcludedDatasheets` (`detachment_excluded_datasheet`,
+>    `faction_keyword_excluded_datasheet`).
+> 2. **Keyword restriction groups / 0-1 caps** — `getKeywordRestrictionGroups`
+>    (`keyword_restriction_group*`, `restriction_group_detachment_limit`).
+> 3. **Mandatory / granted Warlord miniatures** — `getDetachmentWarlordRules`
+>    (`detachment_*_warlord_miniature`), reconciled with the intrinsic Supreme
+>    Commander auto-flag.
+> 4. **Wargear rule prose** — `wargear_rule.rulesText`, surfaced in the wargear
+>    picker and Unit Details.
+> 5. **Sub-faction / allegiance system** — `getAllegianceGroups` + `getArmyRules`,
+>    an allegiance selector, and the previously-skipped allegiance- and
+>    roster-faction-keyword-gated `conditional_keyword` rows (now honored in
+>    `applyKeywordGrants`).
+>
+> Still genuinely unused: the FAQ/errata tables (`faq`, `faq_config`), app/user
+> state (`favourite`, `entitlement`, `grdb_migrations`, `publication`), the
+> play/battle tables (`battle*`, `roster_validation_state`), and empty/vestigial
+> tables. See [DB.md](./DB.md) for the current query-coverage table. The rest of
+> this document is retained as the original audit record.
+
 An audit of structured data present in the companion-app SQLite schema that
 Tactical Cognis does **not** currently read, but arguably should. The trigger
 for this audit was the `conditional_keyword` table (keyword grants from

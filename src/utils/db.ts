@@ -497,6 +497,27 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
   // 9. Fetch points steps
   const datasheetPointsSteps = await query(`SELECT datasheetId, stepAt, stepPoints FROM datasheet_points_step WHERE datasheetId IN (${dsIds}) ORDER BY stepAt`);
 
+  // 9b. Fetch human-readable wargear-option prose ("■ This model's bolt pistol can
+  // be replaced with 1 plasma pistol"). Plain text (bullet chars + newlines), no
+  // HTML markup. Probed defensively — older DBs may lack the table.
+  let wargearRuleRows: Record<string, unknown>[] = [];
+  try {
+    wargearRuleRows = await query(`
+      SELECT datasheetId, rulesText
+      FROM wargear_rule
+      WHERE datasheetId IN (${dsIds})
+      ORDER BY displayOrder
+    `);
+  } catch (err) {
+    console.warn('Skipping wargear rules (table missing or incompatible):', err);
+  }
+  const wargearRulesMap = new Map<string, string[]>();
+  wargearRuleRows.forEach(wr => {
+    const id = String(wr.datasheetId);
+    if (!wargearRulesMap.has(id)) wargearRulesMap.set(id, []);
+    wargearRulesMap.get(id)!.push(String(wr.rulesText));
+  });
+
   const miniMap = new Map();
   miniatures.forEach(m => {
     const kws = miniKeywords.filter(k => k.miniatureId === m.id).map(k => String(k.name));
@@ -550,6 +571,7 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
     leads: bodyguardMap.get(String(ds.id)) || [],
     limitedWargearChoiceSets: limitedSetsMap.get(String(ds.id)) || [],
     wargearLimits: limitsMap.get(String(ds.id)) || [],
+    wargearRules: wargearRulesMap.get(String(ds.id)) || [],
   }));
 }
 
@@ -796,16 +818,23 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
 };
 
 /**
- * Some rules grant a keyword to a unit purely via rule text (detachment ability
- * or a specific model's Warlord-conditional ability) rather than as a native
- * datasheet keyword. The `conditional_keyword` table is the DB's structured
- * record of these grants. We only surface rows the app can actually evaluate:
- *   - conditions gated on allegiance abilities or a roster-declared sub-faction
- *     keyword are skipped entirely — the app has no UI/data model for either.
- *   - warlord-conditional rows are only trusted when the required miniature is
- *     the sole miniature on its datasheet, since `RosterUnit.isWarlord` is
- *     tracked per unit, not per-model-within-a-squad, so we can't resolve which
- *     specific model in a multi-model unit holds Warlord status.
+ * Some rules grant a keyword to a unit purely via rule text (detachment ability,
+ * allegiance/sub-faction choice, or a specific model's Warlord-conditional ability)
+ * rather than as a native datasheet keyword. The `conditional_keyword` table is the
+ * DB's structured record of these grants. Every gate is now surfaced with a
+ * human-readable name so the builder can evaluate it against the current roster:
+ *   - `requiredDetachmentName` — only while that detachment is selected.
+ *   - `requiredAllegianceAbilityName` — only while that allegiance ability is
+ *     declared (see the allegiance selector; previously these rows were dropped).
+ *   - `requiredRosterFactionKeywordName` — only while the roster declares that
+ *     sub-faction keyword (e.g. a Space Marine Chapter).
+ *   - `requiredWarlordUnitName` — only trusted when the required miniature is the
+ *     sole miniature on its datasheet, since `RosterUnit.isWarlord` is tracked per
+ *     unit, not per-model-within-a-squad, so we can't resolve which specific model
+ *     in a multi-model unit holds Warlord status. Multi-model warlord gates are
+ *     still filtered out.
+ * Rows whose allegiance/roster-keyword gate isn't satisfied simply won't match in
+ * `applyKeywordGrants`, so returning them is backward-compatible.
  */
 export async function getConditionalKeywordGrants(factionSlug: string): Promise<Record<string, unknown>[]> {
   const kwIds = await getFactionKeywordIds(factionSlug);
@@ -817,15 +846,17 @@ export async function getConditionalKeywordGrants(factionSlug: string): Promise<
       d.name as datasheetName,
       k.name as keywordName,
       det.name as requiredDetachmentName,
-      m.name as requiredWarlordUnitName
+      m.name as requiredWarlordUnitName,
+      aa.name as requiredAllegianceAbilityName,
+      rfk.name as requiredRosterFactionKeywordName
     FROM conditional_keyword ck
     JOIN datasheet d ON d.id = ck.datasheetId
     JOIN keyword k ON k.id = ck.keywordId
     LEFT JOIN detachment det ON det.id = ck.requiredDetachmentId
     LEFT JOIN miniature m ON m.id = ck.requiredWarlordMiniatureId
-    WHERE ck.requiredAllegianceAbilityId IS NULL
-      AND ck.requiredRosterFactionKeywordId IS NULL
-      AND ck.datasheetId IN (
+    LEFT JOIN allegiance_ability aa ON aa.id = ck.requiredAllegianceAbilityId
+    LEFT JOIN faction_keyword rfk ON rfk.id = ck.requiredRosterFactionKeywordId
+    WHERE ck.datasheetId IN (
         SELECT datasheetId FROM datasheet_faction_keyword WHERE factionKeywordId IN (${idList})
       )
       AND (
@@ -833,6 +864,330 @@ export async function getConditionalKeywordGrants(factionSlug: string): Promise<
         OR (SELECT COUNT(*) FROM miniature m2 WHERE m2.datasheetId = m.datasheetId) = 1
       )
   `);
+}
+
+/**
+ * Allegiance / sub-faction choices for a faction. Two mechanisms feed the builder's
+ * allegiance selector:
+ *   1. `allegiance_ability_group` — structured choice-sets (e.g. "Mark of Chaos",
+ *      "Daemonic Allegiance"). Each group is `isMandatory` (must pick) with
+ *      min/max picks, optionally scoped to a detachment. Detachment-scoped groups
+ *      link to the faction via detachment→faction keyword; faction-wide groups
+ *      (no detachmentId) link via any of their abilities being referenced by one of
+ *      the faction's `conditional_keyword` rows.
+ *   2. Declarable sub-faction keywords — the distinct `faction_keyword`s referenced
+ *      by this faction's `conditional_keyword.requiredRosterFactionKeywordId` (e.g.
+ *      a Space Marine Chapter). Returned as a synthetic optional group so a single
+ *      selector drives both grant gates.
+ * All tables probed defensively.
+ */
+export async function getAllegianceGroups(factionSlug: string): Promise<Record<string, unknown>[]> {
+  const kwIds = await getFactionKeywordIds(factionSlug);
+  if (kwIds.length === 0) return [];
+  const idList = kwIds.map(id => `'${id}'`).join(',');
+  const results: Record<string, unknown>[] = [];
+
+  try {
+    const groups = await query(`
+      SELECT g.id, g.name, g.isMandatory, g.minRosterLimit, g.maxRosterLimit, det.name AS detachmentName
+      FROM allegiance_ability_group g
+      LEFT JOIN detachment det ON det.id = g.detachmentId
+      WHERE
+        g.detachmentId IN (
+          SELECT det2.id FROM detachment det2
+          JOIN detachment_faction_keyword dfk ON dfk.detachmentId = det2.id
+          WHERE dfk.factionKeywordId IN (${idList})
+        )
+        OR (g.detachmentId IS NULL AND g.id IN (
+          SELECT a.allegianceAbilityGroupId
+          FROM allegiance_ability a
+          JOIN conditional_keyword ck ON ck.requiredAllegianceAbilityId = a.id
+          WHERE ck.datasheetId IN (
+            SELECT datasheetId FROM datasheet_faction_keyword WHERE factionKeywordId IN (${idList})
+          )
+        ))
+    `);
+
+    if (groups.length > 0) {
+      const groupIds = groups.map(g => `'${g.id}'`).join(',');
+      const abilities = await query(`
+        SELECT id, allegianceAbilityGroupId AS groupId, name, rules
+        FROM allegiance_ability
+        WHERE allegianceAbilityGroupId IN (${groupIds})
+        ORDER BY displayOrder
+      `);
+      groups.forEach(g => {
+        results.push({
+          id: String(g.id),
+          name: String(g.name),
+          kind: 'ability',
+          isMandatory: !!g.isMandatory,
+          minRosterLimit: g.minRosterLimit != null ? Number(g.minRosterLimit) : null,
+          maxRosterLimit: g.maxRosterLimit != null ? Number(g.maxRosterLimit) : null,
+          detachmentName: g.detachmentName ? String(g.detachmentName) : null,
+          abilities: abilities
+            .filter(a => a.groupId === g.id)
+            .map(a => ({ id: String(a.id), name: String(a.name), rules: a.rules ? String(a.rules) : null })),
+        });
+      });
+    }
+  } catch (err) {
+    console.warn('Skipping allegiance ability groups (table missing or incompatible):', err);
+  }
+
+  // Declarable sub-faction keywords (roster-faction-keyword gated grants).
+  try {
+    const subfactions = await query(`
+      SELECT DISTINCT rfk.id, rfk.name
+      FROM conditional_keyword ck
+      JOIN faction_keyword rfk ON rfk.id = ck.requiredRosterFactionKeywordId
+      WHERE ck.requiredRosterFactionKeywordId IS NOT NULL
+        AND ck.datasheetId IN (
+          SELECT datasheetId FROM datasheet_faction_keyword WHERE factionKeywordId IN (${idList})
+        )
+      ORDER BY rfk.name
+    `);
+    if (subfactions.length > 0) {
+      results.push({
+        id: 'subfaction-keyword',
+        name: 'Sub-faction',
+        kind: 'factionKeyword',
+        isMandatory: false,
+        minRosterLimit: null,
+        maxRosterLimit: 1,
+        detachmentName: null,
+        abilities: subfactions.map(s => ({ id: `fk:${s.name}`, name: String(s.name), rules: null })),
+      });
+    }
+  } catch (err) {
+    console.warn('Skipping declarable sub-factions (table missing or incompatible):', err);
+  }
+
+  return results;
+}
+
+/**
+ * Army-wide special rules for a faction (`army_rule` + `army_rule_faction_keyword`),
+ * e.g. Oath of Moment, Acts of Faith. Display-only; `army_rule_behaviour_type`
+ * rule-engine metadata is intentionally ignored. Probed defensively.
+ */
+export async function getArmyRules(factionSlug: string): Promise<Record<string, unknown>[]> {
+  const kwIds = await getFactionKeywordIds(factionSlug);
+  if (kwIds.length === 0) return [];
+  const idList = kwIds.map(id => `'${id}'`).join(',');
+  try {
+    // Rule prose lives in rule_container_component.armyRuleId (same pattern as
+    // detachment rules). Concatenate a rule's components in display order.
+    const rows = await query(`
+      SELECT ar.id, ar.name, ar.displayOrder AS ruleOrder,
+             rcc.title, rcc.textContent, rcc.displayOrder AS compOrder
+      FROM army_rule ar
+      JOIN army_rule_faction_keyword arfk ON arfk.armyRuleId = ar.id
+      LEFT JOIN rule_container_component rcc ON rcc.armyRuleId = ar.id
+      WHERE arfk.factionKeywordId IN (${idList})
+        AND ar.hiddenFromCommandBunker = 0
+      ORDER BY ar.displayOrder, rcc.displayOrder
+    `);
+
+    const byRule = new Map<string, { name: string; parts: string[] }>();
+    rows.forEach(r => {
+      const id = String(r.id);
+      if (!byRule.has(id)) byRule.set(id, { name: String(r.name), parts: [] });
+      const text = r.textContent ? String(r.textContent) : '';
+      if (text) byRule.get(id)!.parts.push(text);
+    });
+    return Array.from(byRule.entries()).map(([id, v]) => ({
+      id,
+      name: v.name,
+      rules: v.parts.join('\n\n'),
+    }));
+  } catch (err) {
+    console.warn('Skipping army rules (table missing or incompatible):', err);
+    return [];
+  }
+}
+
+/**
+ * Datasheets that cannot legally be taken in a given context. Two DB tables feed
+ * this: `detachment_excluded_datasheet` (barred while a specific detachment is
+ * selected) and `faction_keyword_excluded_datasheet` (barred from the faction
+ * outright). Resolves ids to human-readable names so the builder can match on the
+ * roster unit's own name, mirroring `getConditionalKeywordGrants`. Both tables are
+ * probed defensively — a companion-app DB without them degrades to no exclusions
+ * rather than failing the whole faction load.
+ */
+export async function getExcludedDatasheets(factionSlug: string): Promise<Record<string, unknown>[]> {
+  const kwIds = await getFactionKeywordIds(factionSlug);
+  if (kwIds.length === 0) return [];
+  const idList = kwIds.map(id => `'${id}'`).join(',');
+
+  // Only this faction's own datasheets can appear in the roster, so scope both
+  // exclusion lists to datasheets carrying one of the faction's keywords.
+  const dsScope = `
+    SELECT datasheetId FROM datasheet_faction_keyword WHERE factionKeywordId IN (${idList})
+  `;
+
+  const results: Record<string, unknown>[] = [];
+
+  try {
+    const detachmentExclusions = await query(`
+      SELECT d.name AS datasheetName, det.name AS detachmentName
+      FROM detachment_excluded_datasheet x
+      JOIN datasheet d ON d.id = x.datasheetId
+      JOIN detachment det ON det.id = x.detachmentId
+      WHERE x.detachmentId IN (
+        SELECT det2.id FROM detachment det2
+        JOIN detachment_faction_keyword dfk ON dfk.detachmentId = det2.id
+        WHERE dfk.factionKeywordId IN (${idList})
+      )
+      AND x.datasheetId IN (${dsScope})
+    `);
+    results.push(...detachmentExclusions);
+  } catch (err) {
+    console.warn('Skipping detachment exclusions (table missing or incompatible):', err);
+  }
+
+  try {
+    const factionExclusions = await query(`
+      SELECT d.name AS datasheetName, NULL AS detachmentName
+      FROM faction_keyword_excluded_datasheet x
+      JOIN datasheet d ON d.id = x.datasheetId
+      WHERE x.factionKeywordId IN (${idList})
+      AND x.datasheetId IN (${dsScope})
+    `);
+    results.push(...factionExclusions);
+  } catch (err) {
+    console.warn('Skipping faction exclusions (table missing or incompatible):', err);
+  }
+
+  return results;
+}
+
+/**
+ * Per-roster caps on units carrying certain keywords (`keyword_restriction_group`),
+ * e.g. "0-1 Shadowseer". Each group scopes to a faction keyword, lists the unit
+ * keywords it governs, an optional base `limit`, an optional Warlord gate
+ * (`requiresWarlordMiniatureId` — resolved to a unit name only when that miniature
+ * is the sole model on its datasheet, matching the guard in
+ * `getConditionalKeywordGrants`), and an optional faction keyword that lifts the cap
+ * (`excludedFactionKeywordId`). `restriction_group_detachment_limit` supplies
+ * per-detachment min/max overrides. All tables probed defensively.
+ */
+export async function getKeywordRestrictionGroups(factionSlug: string): Promise<Record<string, unknown>[]> {
+  const kwIds = await getFactionKeywordIds(factionSlug);
+  if (kwIds.length === 0) return [];
+  const idList = kwIds.map(id => `'${id}'`).join(',');
+
+  try {
+    const groups = await query(`
+      SELECT
+        g.id,
+        g."limit" AS baseLimit,
+        xfk.name AS excludedFactionKeywordName,
+        CASE
+          WHEN g.requiresWarlordMiniatureId IS NOT NULL
+            AND (SELECT COUNT(*) FROM miniature m2 WHERE m2.datasheetId = wm.datasheetId) = 1
+          THEN wd.name
+          ELSE NULL
+        END AS requiredWarlordUnitName
+      FROM keyword_restriction_group g
+      LEFT JOIN faction_keyword xfk ON xfk.id = g.excludedFactionKeywordId
+      LEFT JOIN miniature wm ON wm.id = g.requiresWarlordMiniatureId
+      LEFT JOIN datasheet wd ON wd.id = wm.datasheetId
+      WHERE g.factionKeywordId IN (${idList})
+    `);
+    if (groups.length === 0) return [];
+    const groupIds = groups.map(g => `'${g.id}'`).join(',');
+
+    const groupKeywords = await query(`
+      SELECT gk.keywordRestrictionGroupId AS groupId, k.name AS keyword
+      FROM keyword_restriction_group_keyword gk
+      JOIN keyword k ON k.id = gk.keywordId
+      WHERE gk.keywordRestrictionGroupId IN (${groupIds})
+    `);
+
+    let detachmentLimits: Record<string, unknown>[] = [];
+    try {
+      detachmentLimits = await query(`
+        SELECT l.restrictionGroupId AS groupId, det.name AS detachmentName,
+               l.minRosterLimit AS min, l.maxRosterLimit AS max
+        FROM restriction_group_detachment_limit l
+        JOIN detachment det ON det.id = l.detachmentId
+        WHERE l.restrictionGroupId IN (${groupIds})
+      `);
+    } catch (err) {
+      console.warn('Skipping restriction detachment limits (table missing or incompatible):', err);
+    }
+
+    return groups.map(g => ({
+      keywords: groupKeywords.filter(gk => gk.groupId === g.id).map(gk => String(gk.keyword)),
+      limit: g.baseLimit != null ? Number(g.baseLimit) : null,
+      requiredWarlordUnitName: g.requiredWarlordUnitName ? String(g.requiredWarlordUnitName) : null,
+      excludedFactionKeywordName: g.excludedFactionKeywordName ? String(g.excludedFactionKeywordName) : null,
+      detachmentLimits: detachmentLimits
+        .filter(l => l.groupId === g.id)
+        .map(l => ({
+          detachmentName: String(l.detachmentName),
+          min: l.min != null ? Number(l.min) : null,
+          max: l.max != null ? Number(l.max) : null,
+        })),
+    }));
+  } catch (err) {
+    console.warn('Skipping keyword restriction groups (table missing or incompatible):', err);
+    return [];
+  }
+}
+
+/**
+ * Detachment-scoped Warlord constraints. `detachment_mandatory_warlord_miniature`
+ * forces a specific unit to be the Warlord while its detachment is selected (the
+ * DB-driven, authoritative version of intrinsic "Supreme Commander" auto-designation,
+ * and the correct source for Primarch/Ghazghkull-style rules);
+ * `detachment_granted_warlord_miniature` merely permits a unit to be Warlord. Both
+ * tables resolve miniature -> datasheet name and are probed defensively.
+ */
+export async function getDetachmentWarlordRules(factionSlug: string): Promise<Record<string, unknown>[]> {
+  const kwIds = await getFactionKeywordIds(factionSlug);
+  if (kwIds.length === 0) return [];
+  const idList = kwIds.map(id => `'${id}'`).join(',');
+  const detScope = `
+    SELECT det.id FROM detachment det
+    JOIN detachment_faction_keyword dfk ON dfk.detachmentId = det.id
+    WHERE dfk.factionKeywordId IN (${idList})
+  `;
+
+  const fetchRule = async (table: string): Promise<Record<string, unknown>[]> => {
+    try {
+      return await query(`
+        SELECT det.name AS detachmentName, d.name AS datasheetName
+        FROM ${table} w
+        JOIN detachment det ON det.id = w.detachmentId
+        JOIN miniature m ON m.id = w.miniatureId
+        JOIN datasheet d ON d.id = m.datasheetId
+        WHERE w.detachmentId IN (${detScope})
+      `);
+    } catch (err) {
+      console.warn(`Skipping ${table} (table missing or incompatible):`, err);
+      return [];
+    }
+  };
+
+  const mandatory = await fetchRule('detachment_mandatory_warlord_miniature');
+  const granted = await fetchRule('detachment_granted_warlord_miniature');
+
+  const byDetachment = new Map<string, { detachmentName: string; mandatory: Set<string>; granted: Set<string> }>();
+  const ensure = (name: string) => {
+    if (!byDetachment.has(name)) byDetachment.set(name, { detachmentName: name, mandatory: new Set(), granted: new Set() });
+    return byDetachment.get(name)!;
+  };
+  mandatory.forEach(r => ensure(String(r.detachmentName)).mandatory.add(String(r.datasheetName)));
+  granted.forEach(r => ensure(String(r.detachmentName)).granted.add(String(r.datasheetName)));
+
+  return Array.from(byDetachment.values()).map(v => ({
+    detachmentName: v.detachmentName,
+    mandatoryWarlordDatasheets: Array.from(v.mandatory),
+    grantedWarlordDatasheets: Array.from(v.granted),
+  }));
 }
 
 /**
@@ -949,6 +1304,8 @@ export interface DbRosterDetail {
   detachmentName: string | null;
   pointsLimit: number | null;
   units: DbRosterUnitDetail[];
+  /** Distinct allegiance ability ids declared across the roster's units, if any. */
+  allegianceAbilityIds: string[];
 }
 
 const rosterFactionSlug = (factionName: string): string => {
@@ -1113,6 +1470,21 @@ export const getDbRosterDetail = async (rosterId: string): Promise<DbRosterDetai
     };
   });
 
+  // Declared allegiance abilities (per-unit in the companion schema; deduped to an
+  // army-level set). Table may be absent/empty — degrade to none.
+  let allegianceAbilityIds: string[] = [];
+  try {
+    const rows = await query(`
+      SELECT DISTINCT rua.allegianceAbilityId AS id
+      FROM roster_unit_allegiance_ability rua
+      JOIN roster_unit ru ON ru.id = rua.rosterUnitId
+      WHERE ru.rosterId = ?
+    `, [rosterId]);
+    allegianceAbilityIds = rows.map(r => String(r.id));
+  } catch (err) {
+    console.warn('Could not read roster allegiance abilities:', err);
+  }
+
   const factionName = String(rosterRow.factionName || '');
   return {
     id: String(rosterRow.id),
@@ -1122,6 +1494,7 @@ export const getDbRosterDetail = async (rosterId: string): Promise<DbRosterDetai
     detachmentName: detachmentRows.length > 0 ? String(detachmentRows[0].name) : null,
     pointsLimit: rosterRow.pointsLimit != null ? Number(rosterRow.pointsLimit) : null,
     units,
+    allegianceAbilityIds,
   };
 };
 
