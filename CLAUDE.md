@@ -4,7 +4,9 @@ Guidance for Claude Code when working in this repo.
 
 ## What this is
 
-Tactical Cognis is a React + Vite web app for analyzing Warhammer 40k army data (Mathhammer damage simulator, points-efficiency matrix, army builder, faction/detachment browser). All game data lives in a SQLite database that's queried **in-browser** via `sql.js` (WASM) — nothing is rendered server-side and no game data ships in the repo or build output.
+Tactical Cognis is a React + Vite web app for analyzing Warhammer 40k army data (Mathhammer damage simulator, points-efficiency matrix, army builder with live roster-legality validation, faction/detachment browser). All game data lives in a SQLite database that's queried **in-browser** via `sql.js` (WASM) — nothing is rendered server-side and no game data ships in the repo or build output.
+
+For which DB tables the app consumes and what's still on the roadmap, see the coverage table in `DB.md` and the integration log in `TODO.md`.
 
 ## Hard rule: no Games Workshop IP in this repo
 
@@ -41,7 +43,7 @@ Prefer this pattern (plain asserts, zero-dependency, run via `tsx`) if you add c
 ## Architecture
 
 - `src/App.tsx` — top-level router. No react-router; view state is synced to `?view=&faction=&unit=` query params by hand via `history.pushState`/`popstate`.
-- `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers — including allied-unit helpers (`getAlliedUnitsForFaction`/`getAlliedLimitsForFaction`) and saved-roster import helpers (`getSavedDbRosters`/`getDbRosterDetail`, which read the user's own `roster*` tables). Companion-app schema versions vary, so probe version-sensitive tables with `PRAGMA table_info` and degrade gracefully rather than letting one missing column fail a whole load (see the `wargear_limit` handling). The database schema is documented in `DB.md` and the data layer details are mapped in [docs/data_architecture.md](./docs/data_architecture.md).
+- `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers — including allied-unit helpers (`getAlliedUnitsForFaction`/`getAlliedLimitsForFaction`), saved-roster import helpers (`getSavedDbRosters`/`getDbRosterDetail`, which read the user's own `roster*` tables), and the list-legality/allegiance helpers that feed Army Builder validation (`getConditionalKeywordGrants`, `getExcludedDatasheets`, `getKeywordRestrictionGroups`, `getDetachmentWarlordRules`, `getAllegianceGroups`, `getArmyRules`). Companion-app schema versions vary, so probe version-sensitive tables with `PRAGMA table_info` and degrade gracefully rather than letting one missing column fail a whole load (see the `wargear_limit` handling — every legality helper is `try/catch`-guarded the same way). The database schema is documented in `DB.md` and the data layer details are mapped in [docs/data_architecture.md](./docs/data_architecture.md).
 - `src/utils/dataMapper.ts` — maps raw DB rows into the `MergedUnit`/`MergedFaction` shapes the UI consumes.
 - `src/utils/mathhammer.ts` — pure combat-math engine (hit/wound/save/damage expectation, devastating wounds, FNP, AP reduction, etc.), no DB or React dependency. The mathematical equations are documented in [docs/mathhammer_engine.md](./docs/mathhammer_engine.md).
 - `src/components/` — one component per view (`Dashboard`, `FactionBrowser`, `UnitDetails`, `ArmyBuilder`, `DeepAnalysis`) plus `DatabaseUploadView` for the no-DB fallback and `RulesText`, the shared safe renderer for the DB's inline rules markup (DOMParser → React nodes, no `dangerouslySetInnerHTML`). Detailed view maps are in [views/README.md](./views/README.md).

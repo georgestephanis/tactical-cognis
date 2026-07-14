@@ -388,10 +388,20 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                 </div>
 
                 {/* Wargear Options Section */}
-                {datasheet.models.some(m => m.wargearChoiceSets && m.wargearChoiceSets.length > 0) && (
+                {(datasheet.models.some(m => m.wargearChoiceSets && m.wargearChoiceSets.length > 0) || (datasheet.wargearRules && datasheet.wargearRules.length > 0)) && (
                   <div>
                     <div className="datasheet-section-title">Wargear Options</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: 'rgba(0,0,0,0.15)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)', textAlign: 'left' }}>
+                      {/* Official wargear prose from the DB (wargear_rule); plain text with bullet chars. */}
+                      {datasheet.wargearRules && datasheet.wargearRules.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          {datasheet.wargearRules.map((rule, i) => (
+                            <div key={i} style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                              {rule}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {datasheet.models.map(model => {
                         const modelSets = model.wargearChoiceSets?.filter(s => s.choices.length > 0) || [];
                         if (modelSets.length === 0) return null;

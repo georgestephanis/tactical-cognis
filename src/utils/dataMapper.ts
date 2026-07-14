@@ -6,7 +6,14 @@ import type {
   AppEnhancement,
   AppStratagem,
   AlliedLimit,
-  ConditionalKeywordGrant
+  ConditionalKeywordGrant,
+  DatasheetExclusion,
+  KeywordRestrictionGroup,
+  RestrictionDetachmentLimit,
+  DetachmentWarlordRule,
+  AllegianceGroup,
+  AllegianceAbility,
+  ArmyRule
 } from '../types/data';
 import {
   initDatabase,
@@ -16,7 +23,12 @@ import {
   getAlliedUnitsForFaction,
   getAlliedLimitsForFaction,
   getFactionKeywordIds,
-  getConditionalKeywordGrants
+  getConditionalKeywordGrants,
+  getExcludedDatasheets,
+  getKeywordRestrictionGroups,
+  getDetachmentWarlordRules,
+  getAllegianceGroups,
+  getArmyRules
 } from './db';
 
 export { normalizeName };
@@ -31,6 +43,11 @@ export interface MergedFaction {
   alliedLimits?: AlliedLimit[];
   factionKeywordIds?: string[];
   conditionalKeywordGrants?: ConditionalKeywordGrant[];
+  excludedDatasheets?: DatasheetExclusion[];
+  keywordRestrictionGroups?: KeywordRestrictionGroup[];
+  detachmentWarlordRules?: DetachmentWarlordRule[];
+  allegianceGroups?: AllegianceGroup[];
+  armyRules?: ArmyRule[];
 }
 
 /**
@@ -145,6 +162,49 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
     keywordName: String(g.keywordName),
     requiredDetachmentName: g.requiredDetachmentName ? String(g.requiredDetachmentName) : null,
     requiredWarlordUnitName: g.requiredWarlordUnitName ? String(g.requiredWarlordUnitName) : null,
+    requiredAllegianceAbilityName: g.requiredAllegianceAbilityName ? String(g.requiredAllegianceAbilityName) : null,
+    requiredRosterFactionKeywordName: g.requiredRosterFactionKeywordName ? String(g.requiredRosterFactionKeywordName) : null,
+  }));
+
+  const dbExcludedDatasheets = await getExcludedDatasheets(factionSlug);
+  const excludedDatasheets: DatasheetExclusion[] = dbExcludedDatasheets.map(x => ({
+    datasheetName: String(x.datasheetName),
+    detachmentName: x.detachmentName ? String(x.detachmentName) : null,
+  }));
+
+  const dbKeywordRestrictionGroups = await getKeywordRestrictionGroups(factionSlug);
+  const keywordRestrictionGroups: KeywordRestrictionGroup[] = dbKeywordRestrictionGroups.map(g => ({
+    keywords: (g.keywords as string[]) || [],
+    limit: g.limit != null ? Number(g.limit) : null,
+    requiredWarlordUnitName: g.requiredWarlordUnitName ? String(g.requiredWarlordUnitName) : null,
+    excludedFactionKeywordName: g.excludedFactionKeywordName ? String(g.excludedFactionKeywordName) : null,
+    detachmentLimits: ((g.detachmentLimits as RestrictionDetachmentLimit[]) || []),
+  }));
+
+  const dbDetachmentWarlordRules = await getDetachmentWarlordRules(factionSlug);
+  const detachmentWarlordRules: DetachmentWarlordRule[] = dbDetachmentWarlordRules.map(r => ({
+    detachmentName: String(r.detachmentName),
+    mandatoryWarlordDatasheets: (r.mandatoryWarlordDatasheets as string[]) || [],
+    grantedWarlordDatasheets: (r.grantedWarlordDatasheets as string[]) || [],
+  }));
+
+  const dbAllegianceGroups = await getAllegianceGroups(factionSlug);
+  const allegianceGroups: AllegianceGroup[] = dbAllegianceGroups.map(g => ({
+    id: String(g.id),
+    name: String(g.name),
+    kind: (g.kind === 'factionKeyword' ? 'factionKeyword' : 'ability'),
+    isMandatory: !!g.isMandatory,
+    minRosterLimit: g.minRosterLimit != null ? Number(g.minRosterLimit) : null,
+    maxRosterLimit: g.maxRosterLimit != null ? Number(g.maxRosterLimit) : null,
+    detachmentName: g.detachmentName ? String(g.detachmentName) : null,
+    abilities: ((g.abilities as AllegianceAbility[]) || []),
+  }));
+
+  const dbArmyRules = await getArmyRules(factionSlug);
+  const armyRules: ArmyRule[] = dbArmyRules.map(r => ({
+    id: String(r.id),
+    name: String(r.name),
+    rules: r.rules ? String(r.rules) : '',
   }));
 
   const mergedUnits: MergedUnit[] = [];
@@ -266,6 +326,11 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
     alliedLimits,
     factionKeywordIds,
     conditionalKeywordGrants,
+    excludedDatasheets,
+    keywordRestrictionGroups,
+    detachmentWarlordRules,
+    allegianceGroups,
+    armyRules,
   };
 
   factionCache.set(factionSlug, merged);

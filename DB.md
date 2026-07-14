@@ -165,16 +165,29 @@ All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
 | Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement` (+ `enhancement_required_keyword_group`, `enhancement_required_keyword`, `enhancement_excluded_keyword`, `enhancement_required_bodyguard_group`, `enhancement_required_bodyguard_datasheet`, `enhancement_required_wargear`), `stratagem`, `detachment_unique_keyword` |
 | Army Builder game-size limits (`getBattleSizes`) | `battle_size` |
 | Allied units + caps (`getAlliedUnitsForFaction`, `getAlliedLimitsForFaction`) | `faction_keyword_allied_faction`, `allied_faction_datasheet`, `allied_faction_required_detachment`, `allied_faction_keyword`, `allied_faction_points_limit`, `battle_size`, `keyword`, `datasheet`, `publication` |
-| Saved-roster import (`getSavedDbRosters`, `getDbRosterDetail`) | `roster`, `roster_detachment`, `roster_unit`, `roster_unit_miniature`, `roster_unit_wargear_option`, `roster_unit_miniature_wargear_option`, `roster_unit_miniature_enhancement`, `roster_attached_unit(_roster_unit)`, plus joins to `datasheet`, `miniature`, `wargear_option`, `wargear_item`, `enhancement`, `detachment`, `faction_keyword`, `battle_size` |
+| Conditional keyword grants (`getConditionalKeywordGrants`) | `conditional_keyword`, `datasheet`, `keyword`, `detachment`, `miniature`, `allegiance_ability`, `faction_keyword` — including allegiance- and roster-keyword-gated rows, resolved in the Army Builder once an allegiance is declared |
+| Excluded datasheets (`getExcludedDatasheets`) | `detachment_excluded_datasheet`, `faction_keyword_excluded_datasheet`, `detachment`, `datasheet` |
+| Keyword restriction groups / 0-1 caps (`getKeywordRestrictionGroups`) | `keyword_restriction_group`, `keyword_restriction_group_keyword`, `restriction_group_detachment_limit`, `keyword`, `faction_keyword`, `detachment`, `miniature` |
+| Mandatory/granted Warlord (`getDetachmentWarlordRules`) | `detachment_mandatory_warlord_miniature`, `detachment_granted_warlord_miniature`, `detachment`, `miniature`, `datasheet` |
+| Allegiance / sub-faction (`getAllegianceGroups`) | `allegiance_ability_group`, `allegiance_ability`, `detachment`, `conditional_keyword`, `faction_keyword` |
+| Army-wide rules (`getArmyRules`) | `army_rule`, `army_rule_faction_keyword`, `rule_container_component` |
+| Wargear prose (part of `getUnitsByFaction`) | `wargear_rule` (per-datasheet `rulesText`) |
+| Saved-roster import (`getSavedDbRosters`, `getDbRosterDetail`) | `roster`, `roster_detachment`, `roster_unit`, `roster_unit_miniature`, `roster_unit_wargear_option`, `roster_unit_miniature_wargear_option`, `roster_unit_miniature_enhancement`, `roster_unit_allegiance_ability`, `roster_attached_unit(_roster_unit)`, plus joins to `datasheet`, `miniature`, `wargear_option`, `wargear_item`, `enhancement`, `detachment`, `faction_keyword`, `battle_size` |
 | Dashboard stats (`getDbStats`) | `metadata` + row counts of the headline tables |
 
 Meta-factions (umbrella keywords that span several sub-faction keywords) are expanded
 in code via `META_FACTION_MAP` in `db.ts`, then widened by following datasheets that
 carry both a parent and child faction keyword.
 
-Notably **unused so far**: the missions family (other than `battle_size`) and `faq`. Both
-candidates for future features — see [`TODO.md`](./TODO.md) for the integration
-assessment of each. (`invulnerable_save`, `datasheet_damage`, `loadout_choice*` swap options, `wargear_limit*`, `allied_faction*`, and the `roster*` family are now queried and integrated across `getUnitsByFaction` and the Army Builder catalog/validation/import.)
+Notably **unused so far**: the missions family (other than `battle_size`), the FAQ/errata
+tables (`faq`, `faq_config`), and app/user-state tables (`favourite`, `entitlement`,
+`grdb_migrations`). All candidates for future features — see [TODO.md](./TODO.md) for
+the integration roadmap and log. (`invulnerable_save`,
+`datasheet_damage`, `loadout_choice*` swap options, `wargear_limit*`, `wargear_rule`,
+`allied_faction*`, the exclusion/restriction/warlord legality tables, the
+allegiance/army-rule system, and the `roster*` family are now queried and integrated
+across `getUnitsByFaction` and the Army Builder catalog/validation/import. See the
+coverage table above for the query helper that owns each.)
 
 **Schema versions vary between companion-app releases.** Example: in newer DBs
 `wargear_limit` carries `datasheetId`/`wargearItemId`/`limitCount`/`ratioModelCount`;

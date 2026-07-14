@@ -147,6 +147,8 @@ export interface Datasheet {
   rules?: DatasheetRule[];
   leads?: string[];
   limitedWargearChoiceSets?: LimitedWargearChoiceSet[];
+  /** Plain-text "you may replace X with Y" wargear prose (`wargear_rule.rulesText`), ordered. */
+  wargearRules?: string[];
 }
 
 export interface AppDetachmentRule {
@@ -205,6 +207,98 @@ export interface ConditionalKeywordGrant {
   requiredDetachmentName?: string | null;
   /** Only applies while a unit matching this name is the army's Warlord. */
   requiredWarlordUnitName?: string | null;
+  /** Only applies while this allegiance ability is declared for the roster. */
+  requiredAllegianceAbilityName?: string | null;
+  /** Only applies while the roster declares this sub-faction keyword. */
+  requiredRosterFactionKeywordName?: string | null;
+}
+
+/** One selectable option within an allegiance group (e.g. "Khorne"). */
+export interface AllegianceAbility {
+  id: string;
+  name: string;
+  /** Rule prose (may be null for synthetic sub-faction-keyword options). */
+  rules: string | null;
+}
+
+/**
+ * An allegiance / sub-faction choice-set. `kind: 'ability'` maps to a DB
+ * `allegiance_ability_group` (selected options are allegiance ability ids);
+ * `kind: 'factionKeyword'` is a synthetic group of declarable sub-faction keywords
+ * (selected options carry an `fk:<Name>` id and declare a roster faction keyword).
+ */
+export interface AllegianceGroup {
+  id: string;
+  name: string;
+  kind: 'ability' | 'factionKeyword';
+  isMandatory: boolean;
+  minRosterLimit: number | null;
+  maxRosterLimit: number | null;
+  /** Detachment this group is scoped to, if any. */
+  detachmentName: string | null;
+  abilities: AllegianceAbility[];
+}
+
+/** An army-wide special rule (Oath of Moment, Acts of Faith, …). Display-only. */
+export interface ArmyRule {
+  id: string;
+  name: string;
+  rules: string;
+}
+
+/**
+ * A datasheet that may not be taken in a given context — either barred from a
+ * specific detachment (`detachment_excluded_datasheet`) or from the faction as a
+ * whole (`faction_keyword_excluded_datasheet`). Faction-level exclusions carry no
+ * `detachmentName`.
+ */
+export interface DatasheetExclusion {
+  /** Native datasheet name of the excluded unit. */
+  datasheetName: string;
+  /** Detachment the exclusion applies to; null for faction-wide exclusions. */
+  detachmentName: string | null;
+}
+
+/**
+ * A "0-1" / "0-N" cap on how many units carrying a given set of keywords a roster
+ * may include (`keyword_restriction_group` + `_keyword`). The base `limit` can be
+ * overridden per-detachment (`restriction_group_detachment_limit`), and the whole
+ * group can be gated on a declared allegiance/roster faction keyword being ABSENT
+ * (`excludedFactionKeywordName`, e.g. the cap lifts for Ynnari) or on a specific
+ * Warlord being present (`requiresWarlord`).
+ */
+export interface RestrictionDetachmentLimit {
+  detachmentName: string;
+  min: number | null;
+  max: number | null;
+}
+
+export interface KeywordRestrictionGroup {
+  /** Unit keywords this cap applies to (a unit matches if it carries any of them). */
+  keywords: string[];
+  /** Base per-roster cap; null means unlimited unless a detachment override applies. */
+  limit: number | null;
+  /** When set, the cap only applies while this named unit is the army's Warlord. */
+  requiredWarlordUnitName: string | null;
+  /** When the roster declares this faction keyword, the cap does not apply. */
+  excludedFactionKeywordName: string | null;
+  /** Per-detachment min/max overrides of `limit`. */
+  detachmentLimits: RestrictionDetachmentLimit[];
+}
+
+/**
+ * Detachment-scoped Warlord constraints from the DB:
+ * `detachment_mandatory_warlord_miniature` forces the Warlord to be a specific unit
+ * while the detachment is selected; `detachment_granted_warlord_miniature` merely
+ * permits a unit to be Warlord that normally couldn't (informational). Miniature ids
+ * are resolved to their datasheet names for roster-name matching.
+ */
+export interface DetachmentWarlordRule {
+  detachmentName: string;
+  /** Datasheets that MUST be the Warlord when this detachment is selected. */
+  mandatoryWarlordDatasheets: string[];
+  /** Datasheets permitted to be the Warlord when this detachment is selected. */
+  grantedWarlordDatasheets: string[];
 }
 
 export interface AppFactionData {
@@ -265,6 +359,10 @@ export interface ArmyList {
   detachmentSlugs: string[];
   pointLimit: number;
   units: RosterUnit[];
+  /** Declared allegiance ability ids (from `allegiance_ability_group` choices). */
+  selectedAllegianceAbilityIds?: string[];
+  /** Declared sub-faction keyword names (e.g. a Space Marine Chapter). */
+  selectedSubfactionKeywords?: string[];
   /** Legacy single-detachment fields from older saves; migrated to detachmentSlugs on load. */
   detachmentSlug?: string | null;
   detachmentName?: string | null;

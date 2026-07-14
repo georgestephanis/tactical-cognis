@@ -43,7 +43,18 @@ Located in [src/utils/db.ts](https://github.com/georgestephanis/tactical-cognis/
 - **`getDetachmentsByFaction(factionSlug)`:** Resolves detachment rules, stratagems, enhancements, and unique keyword restrictions.
 - **`getFactionList()`:** Computes top-level statistics (counts of units and detachments per faction) directly from the database to populate the Home dashboard.
 - **`getAlliedUnitsForFaction(factionSlug)` / `getAlliedLimitsForFaction(factionSlug)`:** Resolve the `allied_faction*` tables into allied datasheets (surfaced as `MergedFaction.alliedUnits`) and per-ally points caps (`MergedFaction.alliedLimits`) used by the Army Builder's Allies category and validation.
-- **`getSavedDbRosters()` / `getDbRosterDetail(rosterId)`:** Read the user's own saved army lists out of the companion app's `roster*` tables — units, per-model counts, wargear selections, enhancements, warlord flags, and leader→bodyguard attachment groups — so the Army Builder can import them directly. Both tolerate databases without roster tables (`getSavedDbRosters()` returns `[]` rather than throwing), and faction keywords that the app folds into meta-factions (e.g. Heretic Astartes) are remapped to their importable slug.
+- **`getSavedDbRosters()` / `getDbRosterDetail(rosterId)`:** Read the user's own saved army lists out of the companion app's `roster*` tables — units, per-model counts, wargear selections, enhancements, warlord flags, leader→bodyguard attachment groups, and any declared allegiance abilities (`roster_unit_allegiance_ability`) — so the Army Builder can import them directly. Both tolerate databases without roster tables (`getSavedDbRosters()` returns `[]` rather than throwing), and faction keywords that the app folds into meta-factions (e.g. Heretic Astartes) are remapped to their importable slug.
+
+#### List-legality & allegiance helpers
+
+These resolve machine-readable roster rules into name-keyed shapes the Army Builder matches against the current roster. All are `try/catch`-guarded and degrade to `[]` on databases missing the table.
+
+- **`getConditionalKeywordGrants(factionSlug)`:** Rules that grant a keyword to a unit conditionally (detachment, declared allegiance ability, declared sub-faction keyword, or a single-model Warlord). Every gate is returned as a human-readable name; `applyKeywordGrants` in the Army Builder unions the granted keyword onto a unit only when the gate is satisfied.
+- **`getExcludedDatasheets(factionSlug)`:** Units barred from a detachment (`detachment_excluded_datasheet`) or the whole faction (`faction_keyword_excluded_datasheet`).
+- **`getKeywordRestrictionGroups(factionSlug)`:** Per-roster "0-1 X" caps (`keyword_restriction_group*`), with per-detachment min/max overrides, an optional Warlord gate, and an excluded-sub-faction-keyword that lifts the cap.
+- **`getDetachmentWarlordRules(factionSlug)`:** Detachment-scoped mandatory/granted Warlord units — the DB-driven, authoritative version of intrinsic "Supreme Commander" auto-designation.
+- **`getAllegianceGroups(factionSlug)`:** Allegiance / sub-faction choice-sets — structured `allegiance_ability_group` choices (Marks of Chaos, Daemonic Allegiance, …) plus a synthetic group of declarable sub-faction keywords (e.g. Space Marine Chapters). Drives the Army Builder's allegiance selector; selections unlock the gated conditional-keyword grants.
+- **`getArmyRules(factionSlug)`:** Army-wide special rules (Oath of Moment, Acts of Faith) with prose from `rule_container_component`. Display-only.
 
 ### 3. Schema-Version Tolerance
 Uploaded databases come from different companion-app versions, so queries against tables whose shape changed between versions are guarded. Example: per-datasheet wargear limits are only queried after a `PRAGMA table_info(wargear_limit)` check confirms the `datasheetId` column exists; older DBs (where `wargear_limit` is keyed by `limitedWargearChoiceSetId`) skip wargear limits instead of failing the entire faction load.
@@ -88,6 +99,8 @@ export interface MergedUnit {
   requiredDetachmentIds?: string[]; // Allied unit only selectable in these detachments
 }
 ```
+
+The merged blob the Army Builder consumes, `MergedFaction` (in [dataMapper.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/dataMapper.ts)), carries the faction's `units`/`alliedUnits`/`detachments` plus the list-legality and allegiance data assembled by the helpers above: `conditionalKeywordGrants`, `excludedDatasheets`, `keywordRestrictionGroups`, `detachmentWarlordRules`, `allegianceGroups`, and `armyRules`. The declared allegiance itself (`selectedAllegianceAbilityIds`, `selectedSubfactionKeywords`) lives on the `ArmyList` roster state and is persisted to `localStorage`.
 
 ### 2. `RosterUnit`
 Represents a configured unit added to a force roster inside the Army Builder:

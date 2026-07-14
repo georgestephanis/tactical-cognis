@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
+import RulesText from './RulesText';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
 import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet, AppEnhancement, ConditionalKeywordGrant } from '../types/data';
@@ -510,7 +511,9 @@ function generateRosterText(
   roster: RosterUnit[],
   factionData: MergedFaction | null,
   detachmentSlugs: string[],
-  format: 'app' | 'standard' | 'wtc'
+  format: 'app' | 'standard' | 'wtc',
+  allegianceAbilityNames: string[] = [],
+  subfactionKeywords: string[] = []
 ): string {
   const factionName = factionData?.factionName || 'Unknown Faction';
   const detachmentNames = factionData
@@ -525,8 +528,8 @@ function generateRosterText(
     lines.push(`**TOTAL ARMY POINTS:** ${totalPoints}pts\n`);
 
     const chars = roster.filter(u => u.isCharacter);
-    const battleline = roster.filter(u => isUnitEffectivelyBattleline(u, roster, factionData, detachmentNames));
-    const other = roster.filter(u => !u.isCharacter && !isUnitEffectivelyBattleline(u, roster, factionData, detachmentNames));
+    const battleline = roster.filter(u => isUnitEffectivelyBattleline(u, roster, factionData, detachmentNames, allegianceAbilityNames, subfactionKeywords));
+    const other = roster.filter(u => !u.isCharacter && !isUnitEffectivelyBattleline(u, roster, factionData, detachmentNames, allegianceAbilityNames, subfactionKeywords));
 
     if (chars.length > 0) {
       lines.push('**CHARACTER**');
@@ -709,18 +712,24 @@ function applyKeywordGrants(
   unitKeywords: string[],
   grants: ConditionalKeywordGrant[] | undefined,
   detachmentNames: string[],
-  warlordUnitName?: string
+  warlordUnitName?: string,
+  allegianceAbilityNames: string[] = [],
+  subfactionKeywords: string[] = []
 ): string[] {
   if (!catalogUnitName || !grants || grants.length === 0) return unitKeywords;
   const normUnitName = catalogUnitName.toLowerCase();
   const normDetachments = detachmentNames.map(d => d.toLowerCase());
   const normWarlord = warlordUnitName?.toLowerCase();
+  const normAllegiances = allegianceAbilityNames.map(a => a.toLowerCase());
+  const normSubfactions = subfactionKeywords.map(s => s.toLowerCase());
   const granted = new Set<string>();
 
   grants.forEach(grant => {
     if (grant.datasheetName.toLowerCase() !== normUnitName) return;
     if (grant.requiredDetachmentName && !normDetachments.includes(grant.requiredDetachmentName.toLowerCase())) return;
     if (grant.requiredWarlordUnitName && grant.requiredWarlordUnitName.toLowerCase() !== normWarlord) return;
+    if (grant.requiredAllegianceAbilityName && !normAllegiances.includes(grant.requiredAllegianceAbilityName.toLowerCase())) return;
+    if (grant.requiredRosterFactionKeywordName && !normSubfactions.includes(grant.requiredRosterFactionKeywordName.toLowerCase())) return;
     granted.add(grant.keywordName);
   });
 
@@ -736,15 +745,17 @@ function isUnitEffectivelyBattleline(
   unit: RosterUnit,
   roster: RosterUnit[],
   factionData: MergedFaction | null,
-  detachmentNames: string[]
+  detachmentNames: string[],
+  allegianceAbilityNames: string[] = [],
+  subfactionKeywords: string[] = []
 ): boolean {
   if (unit.isBattleline) return true;
   const catalogUnit = factionData
-    ? [...factionData.units, ...(factionData.alliedUnits || [])].find(u => u.slug === unit.unitSlug)
+    ? factionData.units.find(u => u.slug === unit.unitSlug) || factionData.alliedUnits?.find(u => u.slug === unit.unitSlug)
     : undefined;
   const nativeKeywords = catalogUnit?.appDatasheet?.models.flatMap(m => m.keywords) || [];
   const warlordUnitName = roster.find(u => u.isWarlord)?.name;
-  return applyKeywordGrants(catalogUnit?.appDatasheet?.name, nativeKeywords, factionData?.conditionalKeywordGrants, detachmentNames, warlordUnitName)
+  return applyKeywordGrants(catalogUnit?.appDatasheet?.name, nativeKeywords, factionData?.conditionalKeywordGrants, detachmentNames, warlordUnitName, allegianceAbilityNames, subfactionKeywords)
     .some(k => k.toLowerCase() === 'battleline');
 }
 
@@ -1352,6 +1363,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 }) => {
   const [selectedFactionSlug, setSelectedFactionSlug] = useState<string | null>(initialFactionSlug || null);
   const [selectedDetachmentSlugs, setSelectedDetachmentSlugs] = useState<string[]>([]);
+  // Declared allegiance: allegiance ability ids (from allegiance_ability_group) and
+  // sub-faction keyword names. Both unlock conditional_keyword grants and drive
+  // allegiance validation. Persisted with the roster.
+  const [selectedAllegianceAbilityIds, setSelectedAllegianceAbilityIds] = useState<string[]>([]);
+  const [selectedSubfactionKeywords, setSelectedSubfactionKeywords] = useState<string[]>([]);
   const [battleSizes, setBattleSizes] = useState<BattleSize[]>([]);
   const [roster, setRoster] = useState<RosterUnit[]>([]);
   const [pointLimit, setPointLimit] = useState<number>(2000);
@@ -1435,6 +1451,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       factionSlug: selectedFactionSlug,
       factionName: factionData.factionName,
       detachmentSlugs: selectedDetachmentSlugs,
+      selectedAllegianceAbilityIds,
+      selectedSubfactionKeywords,
       pointLimit,
       units: roster
     };
@@ -1463,6 +1481,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     setSelectedFactionSlug(army.factionSlug);
     setSelectedDetachmentSlugs(army.detachmentSlugs);
+    setSelectedAllegianceAbilityIds(army.selectedAllegianceAbilityIds ?? []);
+    setSelectedSubfactionKeywords(army.selectedSubfactionKeywords ?? []);
     setPointLimit(army.pointLimit);
     setCustomLimitInput(army.pointLimit.toString());
     setIsCustomLimit(![1000, 2000, 3000].includes(army.pointLimit));
@@ -1529,11 +1549,28 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     if (!factionData) return false;
     const unit = factionData.units.find(u => u.slug === unitSlug) || factionData.alliedUnits?.find(u => u.slug === unitSlug);
     if (!unit || !unit.appDatasheet) return false;
-    return unit.appDatasheet.abilities.some(a =>
+
+    // Intrinsic rule: a Supreme Commander must always be the Warlord.
+    if (unit.appDatasheet.abilities.some(a =>
       a.name.toLowerCase() === 'supreme-commander' ||
       a.name.toLowerCase() === 'supreme commander'
-    );
-  }, [factionData]);
+    )) return true;
+
+    // DB-driven, detachment-scoped mandatory Warlord (authoritative for
+    // Primarch/Ghazghkull-style rules — detachment_mandatory_warlord_miniature).
+    if (factionData.detachmentWarlordRules && factionData.detachmentWarlordRules.length > 0) {
+      const selectedNames = selectedDetachmentSlugs
+        .map(slug => factionData.detachments.find(d => d.slug === slug)?.name)
+        .filter((n): n is string => !!n)
+        .map(normalizeName);
+      const normUnit = normalizeName(unit.name);
+      return factionData.detachmentWarlordRules.some(r =>
+        selectedNames.includes(normalizeName(r.detachmentName)) &&
+        r.mandatoryWarlordDatasheets.some(ds => normalizeName(ds) === normUnit)
+      );
+    }
+    return false;
+  }, [factionData, selectedDetachmentSlugs]);
 
   useEffect(() => {
     if (!factionData || roster.length === 0) return;
@@ -1910,6 +1947,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       } else {
         await importIntoFaction(parsed, parsed.factionSlug!);
       }
+
+      // Carry any declared allegiance abilities through the import. The ids are
+      // stable allegiance_ability ids and resolve against the loaded faction data.
+      setSelectedAllegianceAbilityIds(detail.allegianceAbilityIds || []);
     } catch (err) {
       console.error('Failed to import roster from database:', err);
       alert('Failed to import this roster from the database.');
@@ -2137,6 +2178,14 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         .filter((d): d is MergedDetachment => !!d)
     : [];
 
+  // Declared allegiance ability names (resolved from ids) + sub-faction keywords,
+  // threaded into keyword-grant evaluation so allegiance/roster-keyword-gated
+  // conditional_keyword rows resolve.
+  const allAllegianceAbilities = (factionData?.allegianceGroups || []).flatMap(g => g.abilities);
+  const selectedAllegianceAbilityNames = selectedAllegianceAbilityIds
+    .map(id => allAllegianceAbilities.find(a => a.id === id)?.name)
+    .filter((n): n is string => !!n);
+
   // Filter list of catalog units
   const filteredCatalog = factionData ? [...factionData.units, ...(factionData.alliedUnits || [])].filter(unit => {
     if (unit.isCombatPatrol || unit.pointsRange.min === 0) return false;
@@ -2208,6 +2257,126 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       validationErrors.push(`Multiple Warlords designated (${warlords.length}). You may only have one Warlord.`);
     }
 
+    // 2b. Excluded datasheets — units barred from the faction outright
+    // (faction_keyword_excluded_datasheet) or from a selected detachment
+    // (detachment_excluded_datasheet). Matched by normalized unit name.
+    if (factionData.excludedDatasheets && factionData.excludedDatasheets.length > 0) {
+      const selectedDetachmentNames = selectedDetachments.map(d => normalizeName(d.name));
+      // Pre-normalize the exclusion list once to avoid re-running normalizeName's
+      // regex for every (roster unit × exclusion) pair.
+      const normalizedExclusions = factionData.excludedDatasheets.map(x => ({
+        datasheetNameNorm: normalizeName(x.datasheetName),
+        detachmentNameNorm: x.detachmentName ? normalizeName(x.detachmentName) : null,
+        detachmentName: x.detachmentName,
+      }));
+      roster.forEach(u => {
+        const normUnit = normalizeName(u.name);
+        normalizedExclusions.forEach(x => {
+          if (x.datasheetNameNorm !== normUnit) return;
+          if (x.detachmentNameNorm === null) {
+            validationErrors.push(`Excluded unit: "${u.name}" cannot be taken by this faction.`);
+          } else if (selectedDetachmentNames.includes(x.detachmentNameNorm)) {
+            validationErrors.push(`Excluded unit: "${u.name}" cannot be taken in the ${x.detachmentName} detachment.`);
+          }
+        });
+      });
+    }
+
+    // 2c. Keyword restriction groups — per-roster caps on units carrying a set of
+    // keywords (e.g. "0-1 Shadowseer"). Base limit may be overridden per-detachment
+    // (min/max), gated on a specific Warlord, or lifted when the roster declares an
+    // excluded faction keyword (a Tier-5 allegiance concept; treated as absent here,
+    // so the cap applies by default).
+    if (factionData.keywordRestrictionGroups && factionData.keywordRestrictionGroups.length > 0) {
+      const selectedDetachmentNames = selectedDetachments.map(d => normalizeName(d.name));
+      const normSubfactions = selectedSubfactionKeywords.map(normalizeName);
+      // Resolve each unique roster slug's lowercased keywords once, rather than
+      // re-running the linear findCatalogUnit lookup for every (group × unit) pair.
+      const rosterKeywordsBySlug = new Map<string, string[]>();
+      roster.forEach(u => {
+        if (rosterKeywordsBySlug.has(u.unitSlug)) return;
+        const catalog = findCatalogUnit(u.unitSlug);
+        rosterKeywordsBySlug.set(u.unitSlug, (catalog?.appDatasheet?.models || [])
+          .flatMap(m => m.keywords || [])
+          .map(k => k.toLowerCase()));
+      });
+      factionData.keywordRestrictionGroups.forEach(group => {
+        // Warlord gate: only enforce while the named unit is the army's Warlord.
+        if (group.requiredWarlordUnitName &&
+            normalizeName(group.requiredWarlordUnitName) !== normalizeName(warlordUnitName || '')) {
+          return;
+        }
+        // The cap lifts when the roster declares the excluded sub-faction keyword
+        // (e.g. Ynnari removes some Asuryani 0-1 caps).
+        if (group.excludedFactionKeywordName &&
+            normSubfactions.includes(normalizeName(group.excludedFactionKeywordName))) {
+          return;
+        }
+
+        const groupKeywords = group.keywords.map(k => k.toLowerCase());
+        const count = roster.filter(u => {
+          const unitKeywords = rosterKeywordsBySlug.get(u.unitSlug) || [];
+          return groupKeywords.some(gk => unitKeywords.includes(gk));
+        }).length;
+
+        // Effective bounds: a matching selected detachment's override wins over the base limit.
+        const override = group.detachmentLimits.find(l => selectedDetachmentNames.includes(normalizeName(l.detachmentName)));
+        const max = override && override.max != null ? override.max : group.limit;
+        const min = override && override.min != null ? override.min : null;
+        const label = group.keywords.join('/');
+
+        if (max != null && count > max) {
+          validationErrors.push(`Exceeded limit for ${label} units: added ${count} (Max is ${max}).`);
+        }
+        if (min != null && count < min) {
+          validationErrors.push(`Requires at least ${min} ${label} unit${min === 1 ? '' : 's'}: have ${count}.`);
+        }
+      });
+    }
+
+    // 2d. Detachment-mandatory Warlord (detachment_mandatory_warlord_miniature).
+    // When a detachment with a mandatory-Warlord rule is selected, one of the
+    // mandated units must be in the roster and designated Warlord.
+    if (factionData.detachmentWarlordRules && factionData.detachmentWarlordRules.length > 0) {
+      const selectedDetachmentNames = selectedDetachments.map(d => normalizeName(d.name));
+      const rosterUnitNames = roster.map(u => normalizeName(u.name));
+      factionData.detachmentWarlordRules.forEach(rule => {
+        if (rule.mandatoryWarlordDatasheets.length === 0) return;
+        if (!selectedDetachmentNames.includes(normalizeName(rule.detachmentName))) return;
+        const mandated = rule.mandatoryWarlordDatasheets.map(normalizeName);
+        const present = mandated.filter(m => rosterUnitNames.includes(m));
+        const names = rule.mandatoryWarlordDatasheets.join('" or "');
+        if (present.length === 0) {
+          validationErrors.push(`${rule.detachmentName} requires "${names}" in the army as your Warlord.`);
+        } else if (!warlords.some(w => mandated.includes(normalizeName(w.name)))) {
+          validationErrors.push(`${rule.detachmentName} requires "${names}" to be your Warlord.`);
+        }
+      });
+    }
+
+    // 2e. Allegiance groups — mandatory groups must be satisfied, and picks must
+    // respect each group's min/max. Detachment-scoped groups only apply when their
+    // detachment is selected.
+    if (factionData.allegianceGroups && factionData.allegianceGroups.length > 0) {
+      factionData.allegianceGroups.forEach(group => {
+        if (group.detachmentName &&
+            !selectedDetachments.some(d => normalizeName(d.name) === normalizeName(group.detachmentName!))) {
+          return;
+        }
+        const count = group.kind === 'factionKeyword'
+          ? group.abilities.filter(a => selectedSubfactionKeywords.includes(a.name)).length
+          : group.abilities.filter(a => selectedAllegianceAbilityIds.includes(a.id)).length;
+        const min = group.minRosterLimit ?? (group.isMandatory ? 1 : 0);
+        const max = group.maxRosterLimit ?? (group.isMandatory ? 1 : null);
+        if (count < min) {
+          validationErrors.push(`You must choose ${min === 1 ? 'an option' : `at least ${min} options`} for ${group.name}.`);
+        }
+        if (max != null && count > max) {
+          validationErrors.push(`Too many ${group.name} choices: selected ${count} (Max is ${max}).`);
+        }
+      });
+    }
+
     // 3. Rule of 3 (Datasheet counts)
     const datasheetCounts: Record<string, number> = {};
     roster.forEach(u => {
@@ -2217,7 +2386,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     Object.entries(datasheetCounts).forEach(([name, count]) => {
       // Find one matching unit to determine if it is battleline (battleline may take double)
       const matchedUnit = roster.find(u => u.name === name);
-      const matchedUnitIsBattleline = !!matchedUnit && isUnitEffectivelyBattleline(matchedUnit, roster, factionData, selectedDetachments.map(d => d.name));
+      const matchedUnitIsBattleline = !!matchedUnit && isUnitEffectivelyBattleline(matchedUnit, roster, factionData, selectedDetachments.map(d => d.name), selectedAllegianceAbilityNames, selectedSubfactionKeywords);
       const limit = matchedUnitIsBattleline ? duplicateUnitLimit * 2 : duplicateUnitLimit;
       if (count > limit) {
         validationErrors.push(`Exceeded allowance for "${name}": added ${count} copies (Max is ${limit} for ${matchedUnitIsBattleline ? 'Battleline' : 'standard'} units).`);
@@ -2255,7 +2424,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           // Check keywords on this unit
           const catalogUnitForEnh = findCatalogUnit(u.unitSlug);
           const nativeKeywords = catalogUnitForEnh?.appDatasheet?.models.flatMap(m => m.keywords) || [];
-          const keywords = applyKeywordGrants(catalogUnitForEnh?.appDatasheet?.name, nativeKeywords, factionData?.conditionalKeywordGrants, selectedDetachments.map(d => d.name), warlordUnitName);
+          const keywords = applyKeywordGrants(catalogUnitForEnh?.appDatasheet?.name, nativeKeywords, factionData?.conditionalKeywordGrants, selectedDetachments.map(d => d.name), warlordUnitName, selectedAllegianceAbilityNames, selectedSubfactionKeywords);
           const isChar = keywords.some(k => k.toLowerCase() === 'character');
           const isEpicHero = keywords.some(k => k.toLowerCase() === 'epic hero');
 
@@ -2445,6 +2614,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   setSelectedFactionSlug(slug);
                   setRoster([]);
                   setSelectedDetachmentSlugs([]);
+                  setSelectedAllegianceAbilityIds([]);
+                  setSelectedSubfactionKeywords([]);
                   if (!slug) setFactionData(null);
                 }}
                 style={{
@@ -2759,6 +2930,77 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                     ))}
                   </div>
                 )}
+
+                {/* Allegiance / sub-faction selectors — each group unlocks conditional
+                    keyword grants and drives allegiance validation. Detachment-scoped
+                    groups only appear once their detachment is selected. */}
+                {(factionData.allegianceGroups || [])
+                  .filter(g => !g.detachmentName || selectedDetachments.some(d => normalizeName(d.name) === normalizeName(g.detachmentName!)))
+                  .map(group => {
+                    const isKeyword = group.kind === 'factionKeyword';
+                    const isSelected = (opt: { id: string; name: string }) =>
+                      isKeyword ? selectedSubfactionKeywords.includes(opt.name) : selectedAllegianceAbilityIds.includes(opt.id);
+                    const toggle = (opt: { id: string; name: string }, checked: boolean) => {
+                      if (isKeyword) {
+                        setSelectedSubfactionKeywords(prev =>
+                          checked ? [...prev.filter(k => k !== opt.name), opt.name] : prev.filter(k => k !== opt.name));
+                      } else {
+                        setSelectedAllegianceAbilityIds(prev =>
+                          checked ? [...prev.filter(i => i !== opt.id), opt.id] : prev.filter(i => i !== opt.id));
+                      }
+                    };
+                    const groupSelectedCount = group.abilities.filter(isSelected).length;
+                    const max = group.maxRosterLimit ?? (group.isMandatory ? 1 : null);
+                    const singleChoice = max === 1;
+                    const currentId = group.abilities.find(isSelected)?.id || '';
+                    return (
+                      <div key={group.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
+                        <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                          {group.name}{group.isMandatory ? ' *' : ''}:
+                        </span>
+                        {singleChoice ? (
+                          <select
+                            value={currentId}
+                            onChange={(e) => {
+                              // Replace the group's prior pick in a single state update:
+                              // drop every ability in this group, then add the chosen one.
+                              const opt = group.abilities.find(a => a.id === e.target.value);
+                              if (isKeyword) {
+                                setSelectedSubfactionKeywords(prev => {
+                                  const filtered = prev.filter(k => !group.abilities.some(a => a.name === k));
+                                  return opt ? [...filtered, opt.name] : filtered;
+                                });
+                              } else {
+                                setSelectedAllegianceAbilityIds(prev => {
+                                  const filtered = prev.filter(id => !group.abilities.some(a => a.id === id));
+                                  return opt ? [...filtered, opt.id] : filtered;
+                                });
+                              }
+                            }}
+                            style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '0.4rem 0.8rem', fontSize: '0.85rem', cursor: 'pointer' }}
+                          >
+                            <option value="">{group.isMandatory ? `-- Choose ${group.name} --` : '-- None --'}</option>
+                            {group.abilities.map(a => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                            {group.abilities.map(a => {
+                              const checked = isSelected(a);
+                              const atMax = max != null && !checked && groupSelectedCount >= max;
+                              return (
+                                <label key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.82rem', color: atMax ? 'var(--text-muted)' : 'var(--text-primary)', cursor: atMax ? 'not-allowed' : 'pointer' }}>
+                                  <input type="checkbox" checked={checked} disabled={atMax} onChange={(e) => toggle(a, e.target.checked)} />
+                                  {a.name}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
 
               {/* Points gauge & Limits */}
@@ -2852,6 +3094,37 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               />
             </div>
           </div>
+
+          {/* Army-wide rules (army_rule) + declared allegiance ability rules. Reference only. */}
+          {((factionData.armyRules && factionData.armyRules.length > 0) || selectedAllegianceAbilityNames.length > 0) && (
+            <details style={{ background: 'rgba(0,0,0,0.15)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', padding: '0.6rem 0.9rem' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, letterSpacing: '0.04em', color: 'var(--accent-gold)', textTransform: 'uppercase' }}>
+                Army Rules{selectedAllegianceAbilityNames.length > 0 ? ' & Allegiance' : ''}
+              </summary>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.6rem' }}>
+                {(factionData.armyRules || []).map(rule => (
+                  <div key={rule.id}>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>{rule.name}</div>
+                    {rule.rules && (
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                        <RulesText text={rule.rules} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {allAllegianceAbilities
+                  .filter(a => selectedAllegianceAbilityIds.includes(a.id) && a.rules)
+                  .map(a => (
+                    <div key={a.id}>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--accent-gold)' }}>{a.name}</div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                        <RulesText text={a.rules!} />
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </details>
+          )}
 
           {/* Validation Alerts Bar */}
           {validationErrors.length > 0 && (
@@ -3526,7 +3799,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     // Enhancements are offered from every selected detachment (filtered by eligibility)
     const nativeKeywords = matchedCatalog?.appDatasheet?.models.flatMap(m => m.keywords) || [];
-    const keywords = applyKeywordGrants(matchedCatalog?.appDatasheet?.name, nativeKeywords, factionData.conditionalKeywordGrants, selectedDetachments.map(d => d.name), roster.find(u => u.isWarlord)?.name);
+    const keywords = applyKeywordGrants(matchedCatalog?.appDatasheet?.name, nativeKeywords, factionData.conditionalKeywordGrants, selectedDetachments.map(d => d.name), roster.find(u => u.isWarlord)?.name, selectedAllegianceAbilityNames, selectedSubfactionKeywords);
     const isEpicHero = keywords.some(k => k.toLowerCase() === 'epic hero');
     const isEffectivelyBattleline = keywords.some(k => k.toLowerCase() === 'battleline');
     const eligibleEnhancements = selectedDetachments.flatMap(d => d.enhancements).filter(e => {
@@ -4057,6 +4330,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '0.25rem', marginBottom: '0.25rem' }}>
                 Wargear Selections
               </div>
+              {/* Official wargear prose from the DB (wargear_rule) — reference text for the choices below. */}
+              {matchedCatalog.appDatasheet.wargearRules && matchedCatalog.appDatasheet.wargearRules.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginBottom: '0.25rem' }}>
+                  {matchedCatalog.appDatasheet.wargearRules.map((rule, i) => (
+                    <div key={i} style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', whiteSpace: 'pre-line', lineHeight: 1.45, opacity: 0.85 }}>
+                      {rule}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {matchedCatalog.appDatasheet.models.map(model => {
                   const totalModelCount = modelCounts[model.name] || 0;
@@ -4411,7 +4694,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       roster,
       factionData,
       selectedDetachmentSlugs,
-      shareFormat
+      shareFormat,
+      selectedAllegianceAbilityNames,
+      selectedSubfactionKeywords
     );
 
     const handleCopy = () => {
