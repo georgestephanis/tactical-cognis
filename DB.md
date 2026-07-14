@@ -181,7 +181,8 @@ carry both a parent and child faction keyword.
 
 Notably **unused so far**: the missions family (other than `battle_size`), the FAQ/errata
 tables (`faq`, `faq_config`), and app/user-state tables (`favourite`, `entitlement`,
-`grdb_migrations`). All candidates for future features. (`invulnerable_save`,
+`grdb_migrations`). All candidates for future features — see [TODO.md](./TODO.md) for
+the integration roadmap and log. (`invulnerable_save`,
 `datasheet_damage`, `loadout_choice*` swap options, `wargear_limit*`, `wargear_rule`,
 `allied_faction*`, the exclusion/restriction/warlord legality tables, the
 allegiance/army-rule system, and the `roster*` family are now queried and integrated

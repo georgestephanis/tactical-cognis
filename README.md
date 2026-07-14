@@ -1,6 +1,6 @@
 # ⚙️ Tactical Cognis
 
-A high-fidelity analytical web app for Warhammer 40k: Mathhammer simulator, points-efficiency matrix, army builder, and detachment/stratagem browser. Everything renders from a SQLite database queried in-browser via [`sql.js`](https://sql.js.org/) — **no game data is bundled in this repo.**
+A high-fidelity analytical web app for Warhammer 40k: Mathhammer simulator, points-efficiency matrix, army builder with live roster-legality validation (points/battle-size, Rule of 3, allied caps, excluded units, 0-1 keyword caps, mandatory Warlords, and sub-faction/allegiance choices), and detachment/stratagem browser. Everything renders from a SQLite database queried in-browser via [`sql.js`](https://sql.js.org/) — **no game data is bundled in this repo.**
 
 This repo contains only the app and its build tooling. It does not include any datamining/scraping pipeline or Games Workshop content — you supply your own extracted database locally (see below), which stays untracked by git.
 
@@ -21,7 +21,7 @@ The app reads a `40k.sqlite` file with the companion-app schema (`datasheet`, `m
 2. **Manual extraction** — see [manual-db-sqlite.md](./manual-db-sqlite.md) for pulling `db.sqlite` straight out of the official WH40k companion app by hand.
 3. **In-browser upload** — run the app with no database present and it'll prompt you to upload one.
 
-If the database contains your own saved army lists from the companion app (the `roster*` tables), the Army Builder's Import modal lists them and can pull them in directly — exact units, model counts, wargear, enhancements, and leader attachments included.
+If the database contains your own saved army lists from the companion app (the `roster*` tables), the Army Builder's Import modal lists them and can pull them in directly — exact units, model counts, wargear, enhancements, declared allegiance, and leader attachments included.
 
 ## Building
 
@@ -49,5 +49,6 @@ For details on the project structure, views, and core engines, see:
 - **[UI Storyboard Registry](./views/README.md):** An interactive view map describing each main page layout, CSS selectors, and sub-routing parameters.
 - **[Mathhammer Simulation Engine](./docs/mathhammer_engine.md):** The math formulas, special rule combinations, and dice parsing logic.
 - **[Data & Mapping Architecture](./docs/data_architecture.md):** Relational queries, caching layers, and TypeScript structures.
-- **[Database Schema Reference](./DB.md):** Comprehensive schema map of the Warhammer companion app SQLite db.
+- **[Database Schema Reference](./DB.md):** Comprehensive schema map of the Warhammer companion app SQLite db, including the coverage table of which tables the app queries.
+- **[Integrations Roadmap & Log](./TODO.md):** What DB-backed features are built and what's still on the roadmap.
 - **[Manual SQLite Setup](./manual-db-sqlite.md):** Detailed guide to extracting the database from your device.

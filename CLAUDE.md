@@ -4,7 +4,9 @@ Guidance for Claude Code when working in this repo.
 
 ## What this is
 
-Tactical Cognis is a React + Vite web app for analyzing Warhammer 40k army data (Mathhammer damage simulator, points-efficiency matrix, army builder, faction/detachment browser). All game data lives in a SQLite database that's queried **in-browser** via `sql.js` (WASM) — nothing is rendered server-side and no game data ships in the repo or build output.
+Tactical Cognis is a React + Vite web app for analyzing Warhammer 40k army data (Mathhammer damage simulator, points-efficiency matrix, army builder with live roster-legality validation, faction/detachment browser). All game data lives in a SQLite database that's queried **in-browser** via `sql.js` (WASM) — nothing is rendered server-side and no game data ships in the repo or build output.
+
+For which DB tables the app consumes and what's still on the roadmap, see the coverage table in `DB.md` and the integration log in `TODO.md`.
 
 ## Hard rule: no Games Workshop IP in this repo
 
