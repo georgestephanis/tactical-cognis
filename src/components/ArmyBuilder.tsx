@@ -751,7 +751,7 @@ function isUnitEffectivelyBattleline(
 ): boolean {
   if (unit.isBattleline) return true;
   const catalogUnit = factionData
-    ? [...factionData.units, ...(factionData.alliedUnits || [])].find(u => u.slug === unit.unitSlug)
+    ? factionData.units.find(u => u.slug === unit.unitSlug) || factionData.alliedUnits?.find(u => u.slug === unit.unitSlug)
     : undefined;
   const nativeKeywords = catalogUnit?.appDatasheet?.models.flatMap(m => m.keywords) || [];
   const warlordUnitName = roster.find(u => u.isWarlord)?.name;
@@ -2262,13 +2262,20 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     // (detachment_excluded_datasheet). Matched by normalized unit name.
     if (factionData.excludedDatasheets && factionData.excludedDatasheets.length > 0) {
       const selectedDetachmentNames = selectedDetachments.map(d => normalizeName(d.name));
+      // Pre-normalize the exclusion list once to avoid re-running normalizeName's
+      // regex for every (roster unit × exclusion) pair.
+      const normalizedExclusions = factionData.excludedDatasheets.map(x => ({
+        datasheetNameNorm: normalizeName(x.datasheetName),
+        detachmentNameNorm: x.detachmentName ? normalizeName(x.detachmentName) : null,
+        detachmentName: x.detachmentName,
+      }));
       roster.forEach(u => {
         const normUnit = normalizeName(u.name);
-        factionData.excludedDatasheets!.forEach(x => {
-          if (normalizeName(x.datasheetName) !== normUnit) return;
-          if (x.detachmentName === null) {
+        normalizedExclusions.forEach(x => {
+          if (x.datasheetNameNorm !== normUnit) return;
+          if (x.detachmentNameNorm === null) {
             validationErrors.push(`Excluded unit: "${u.name}" cannot be taken by this faction.`);
-          } else if (selectedDetachmentNames.includes(normalizeName(x.detachmentName))) {
+          } else if (selectedDetachmentNames.includes(x.detachmentNameNorm)) {
             validationErrors.push(`Excluded unit: "${u.name}" cannot be taken in the ${x.detachmentName} detachment.`);
           }
         });
@@ -2283,6 +2290,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     if (factionData.keywordRestrictionGroups && factionData.keywordRestrictionGroups.length > 0) {
       const selectedDetachmentNames = selectedDetachments.map(d => normalizeName(d.name));
       const normSubfactions = selectedSubfactionKeywords.map(normalizeName);
+      // Resolve each unique roster slug's lowercased keywords once, rather than
+      // re-running the linear findCatalogUnit lookup for every (group × unit) pair.
+      const rosterKeywordsBySlug = new Map<string, string[]>();
+      roster.forEach(u => {
+        if (rosterKeywordsBySlug.has(u.unitSlug)) return;
+        const catalog = findCatalogUnit(u.unitSlug);
+        rosterKeywordsBySlug.set(u.unitSlug, (catalog?.appDatasheet?.models || [])
+          .flatMap(m => m.keywords || [])
+          .map(k => k.toLowerCase()));
+      });
       factionData.keywordRestrictionGroups.forEach(group => {
         // Warlord gate: only enforce while the named unit is the army's Warlord.
         if (group.requiredWarlordUnitName &&
@@ -2298,10 +2315,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
         const groupKeywords = group.keywords.map(k => k.toLowerCase());
         const count = roster.filter(u => {
-          const catalog = findCatalogUnit(u.unitSlug);
-          const unitKeywords = (catalog?.appDatasheet?.models || [])
-            .flatMap(m => m.keywords || [])
-            .map(k => k.toLowerCase());
+          const unitKeywords = rosterKeywordsBySlug.get(u.unitSlug) || [];
           return groupKeywords.some(gk => unitKeywords.includes(gk));
         }).length;
 
@@ -2948,10 +2962,20 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                           <select
                             value={currentId}
                             onChange={(e) => {
-                              // Clear the group's prior pick, then set the new one.
-                              group.abilities.forEach(a => toggle(a, false));
+                              // Replace the group's prior pick in a single state update:
+                              // drop every ability in this group, then add the chosen one.
                               const opt = group.abilities.find(a => a.id === e.target.value);
-                              if (opt) toggle(opt, true);
+                              if (isKeyword) {
+                                setSelectedSubfactionKeywords(prev => {
+                                  const filtered = prev.filter(k => !group.abilities.some(a => a.name === k));
+                                  return opt ? [...filtered, opt.name] : filtered;
+                                });
+                              } else {
+                                setSelectedAllegianceAbilityIds(prev => {
+                                  const filtered = prev.filter(id => !group.abilities.some(a => a.id === id));
+                                  return opt ? [...filtered, opt.id] : filtered;
+                                });
+                              }
                             }}
                             style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '0.4rem 0.8rem', fontSize: '0.85rem', cursor: 'pointer' }}
                           >
