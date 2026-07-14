@@ -5,7 +5,8 @@ import type {
   AppDetachmentRule,
   AppEnhancement,
   AppStratagem,
-  AlliedLimit
+  AlliedLimit,
+  ConditionalKeywordGrant
 } from '../types/data';
 import {
   initDatabase,
@@ -14,7 +15,8 @@ import {
   normalizeName,
   getAlliedUnitsForFaction,
   getAlliedLimitsForFaction,
-  getFactionKeywordIds
+  getFactionKeywordIds,
+  getConditionalKeywordGrants
 } from './db';
 
 export { normalizeName };
@@ -28,6 +30,7 @@ export interface MergedFaction {
   alliedUnits?: MergedUnit[];
   alliedLimits?: AlliedLimit[];
   factionKeywordIds?: string[];
+  conditionalKeywordGrants?: ConditionalKeywordGrant[];
 }
 
 /**
@@ -136,6 +139,13 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
   const dbAlliedUnits = await getAlliedUnitsForFaction(factionSlug);
   const dbAlliedLimits = await getAlliedLimitsForFaction(factionSlug);
   const factionKeywordIds = await getFactionKeywordIds(factionSlug);
+  const dbConditionalKeywordGrants = await getConditionalKeywordGrants(factionSlug);
+  const conditionalKeywordGrants: ConditionalKeywordGrant[] = dbConditionalKeywordGrants.map(g => ({
+    datasheetName: String(g.datasheetName),
+    keywordName: String(g.keywordName),
+    requiredDetachmentName: g.requiredDetachmentName ? String(g.requiredDetachmentName) : null,
+    requiredWarlordUnitName: g.requiredWarlordUnitName ? String(g.requiredWarlordUnitName) : null,
+  }));
 
   const mergedUnits: MergedUnit[] = [];
 
@@ -255,6 +265,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
     alliedUnits,
     alliedLimits,
     factionKeywordIds,
+    conditionalKeywordGrants,
   };
 
   factionCache.set(factionSlug, merged);

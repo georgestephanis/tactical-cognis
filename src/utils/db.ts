@@ -796,6 +796,46 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
 };
 
 /**
+ * Some rules grant a keyword to a unit purely via rule text (detachment ability
+ * or a specific model's Warlord-conditional ability) rather than as a native
+ * datasheet keyword. The `conditional_keyword` table is the DB's structured
+ * record of these grants. We only surface rows the app can actually evaluate:
+ *   - conditions gated on allegiance abilities or a roster-declared sub-faction
+ *     keyword are skipped entirely — the app has no UI/data model for either.
+ *   - warlord-conditional rows are only trusted when the required miniature is
+ *     the sole miniature on its datasheet, since `RosterUnit.isWarlord` is
+ *     tracked per unit, not per-model-within-a-squad, so we can't resolve which
+ *     specific model in a multi-model unit holds Warlord status.
+ */
+export async function getConditionalKeywordGrants(factionSlug: string): Promise<Record<string, unknown>[]> {
+  const kwIds = await getFactionKeywordIds(factionSlug);
+  if (kwIds.length === 0) return [];
+  const idList = kwIds.map(id => `'${id}'`).join(',');
+
+  return await query(`
+    SELECT
+      d.name as datasheetName,
+      k.name as keywordName,
+      det.name as requiredDetachmentName,
+      m.name as requiredWarlordUnitName
+    FROM conditional_keyword ck
+    JOIN datasheet d ON d.id = ck.datasheetId
+    JOIN keyword k ON k.id = ck.keywordId
+    LEFT JOIN detachment det ON det.id = ck.requiredDetachmentId
+    LEFT JOIN miniature m ON m.id = ck.requiredWarlordMiniatureId
+    WHERE ck.requiredAllegianceAbilityId IS NULL
+      AND ck.requiredRosterFactionKeywordId IS NULL
+      AND ck.datasheetId IN (
+        SELECT datasheetId FROM datasheet_faction_keyword WHERE factionKeywordId IN (${idList})
+      )
+      AND (
+        ck.requiredWarlordMiniatureId IS NULL
+        OR (SELECT COUNT(*) FROM miniature m2 WHERE m2.datasheetId = m.datasheetId) = 1
+      )
+  `);
+}
+
+/**
  * Returns a list of all playable factions for the dashboard.
  */
 export const getFactionList = async () => {

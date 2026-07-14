@@ -196,6 +196,17 @@ export interface AppDetachment {
   stratagems: AppStratagem[];
 }
 
+export interface ConditionalKeywordGrant {
+  /** Native datasheet name of the unit receiving the keyword. */
+  datasheetName: string;
+  /** Keyword granted when the condition holds. */
+  keywordName: string;
+  /** Only applies while this detachment is selected. */
+  requiredDetachmentName?: string | null;
+  /** Only applies while a unit matching this name is the army's Warlord. */
+  requiredWarlordUnitName?: string | null;
+}
+
 export interface AppFactionData {
   faction: string;
   slug: string;

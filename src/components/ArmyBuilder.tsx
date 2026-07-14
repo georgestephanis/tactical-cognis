@@ -18,7 +18,7 @@ import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/
 import type { MergedFaction } from '../utils/dataMapper';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
-import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet, AppEnhancement } from '../types/data';
+import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet, AppEnhancement, ConditionalKeywordGrant } from '../types/data';
 
 
 interface ParsedRosterUnit {
@@ -525,8 +525,8 @@ function generateRosterText(
     lines.push(`**TOTAL ARMY POINTS:** ${totalPoints}pts\n`);
 
     const chars = roster.filter(u => u.isCharacter);
-    const battleline = roster.filter(u => u.isBattleline);
-    const other = roster.filter(u => !u.isCharacter && !u.isBattleline);
+    const battleline = roster.filter(u => isUnitEffectivelyBattleline(u, roster, factionData, detachmentNames));
+    const other = roster.filter(u => !u.isCharacter && !isUnitEffectivelyBattleline(u, roster, factionData, detachmentNames));
 
     if (chars.length > 0) {
       lines.push('**CHARACTER**');
@@ -692,6 +692,60 @@ function canUnitSplit(
   if (transportSplitUnits.some(u => normName.includes(u))) return true;
 
   return false;
+}
+
+/**
+ * Some rules grant a keyword to a unit purely via rule text rather than as a
+ * native datasheet keyword, so nothing that reads `model.keywords` sees the
+ * grant unless we apply it ourselves — e.g. Orks' "Rollin' Deff" grants WAGON
+ * to Battlewagon/Hunta Rig/Kill Rig, or Wazdakka Gutsmek grants BATTLELINE to
+ * Warbikers while he is Warlord. These are sourced from the DB's
+ * `conditional_keyword` table (see `getConditionalKeywordGrants` in db.ts) via
+ * `factionData.conditionalKeywordGrants`, keyed on the target unit's own
+ * datasheet name rather than a hand-maintained list.
+ */
+function applyKeywordGrants(
+  catalogUnitName: string | undefined,
+  unitKeywords: string[],
+  grants: ConditionalKeywordGrant[] | undefined,
+  detachmentNames: string[],
+  warlordUnitName?: string
+): string[] {
+  if (!catalogUnitName || !grants || grants.length === 0) return unitKeywords;
+  const normUnitName = catalogUnitName.toLowerCase();
+  const normDetachments = detachmentNames.map(d => d.toLowerCase());
+  const normWarlord = warlordUnitName?.toLowerCase();
+  const granted = new Set<string>();
+
+  grants.forEach(grant => {
+    if (grant.datasheetName.toLowerCase() !== normUnitName) return;
+    if (grant.requiredDetachmentName && !normDetachments.includes(grant.requiredDetachmentName.toLowerCase())) return;
+    if (grant.requiredWarlordUnitName && grant.requiredWarlordUnitName.toLowerCase() !== normWarlord) return;
+    granted.add(grant.keywordName);
+  });
+
+  return granted.size > 0 ? [...unitKeywords, ...granted] : unitKeywords;
+}
+
+/**
+ * Whether a roster unit counts as Battleline right now, including keyword
+ * grants sourced from `factionData.conditionalKeywordGrants` (native
+ * Battleline units already carry the keyword).
+ */
+function isUnitEffectivelyBattleline(
+  unit: RosterUnit,
+  roster: RosterUnit[],
+  factionData: MergedFaction | null,
+  detachmentNames: string[]
+): boolean {
+  if (unit.isBattleline) return true;
+  const catalogUnit = factionData
+    ? [...factionData.units, ...(factionData.alliedUnits || [])].find(u => u.slug === unit.unitSlug)
+    : undefined;
+  const nativeKeywords = catalogUnit?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+  const warlordUnitName = roster.find(u => u.isWarlord)?.name;
+  return applyKeywordGrants(catalogUnit?.appDatasheet?.name, nativeKeywords, factionData?.conditionalKeywordGrants, detachmentNames, warlordUnitName)
+    .some(k => k.toLowerCase() === 'battleline');
 }
 
 /**
@@ -2147,6 +2201,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     // 2. Warlord check
     const characters = roster.filter(u => u.isCharacter);
     const warlords = roster.filter(u => u.isWarlord);
+    const warlordUnitName = warlords[0]?.name;
     if (characters.length > 0 && warlords.length === 0) {
       validationErrors.push("No Warlord designated. Every army must have exactly one Warlord character.");
     } else if (warlords.length > 1) {
@@ -2162,9 +2217,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     Object.entries(datasheetCounts).forEach(([name, count]) => {
       // Find one matching unit to determine if it is battleline (battleline may take double)
       const matchedUnit = roster.find(u => u.name === name);
-      const limit = matchedUnit?.isBattleline ? duplicateUnitLimit * 2 : duplicateUnitLimit;
+      const matchedUnitIsBattleline = !!matchedUnit && isUnitEffectivelyBattleline(matchedUnit, roster, factionData, selectedDetachments.map(d => d.name));
+      const limit = matchedUnitIsBattleline ? duplicateUnitLimit * 2 : duplicateUnitLimit;
       if (count > limit) {
-        validationErrors.push(`Exceeded allowance for "${name}": added ${count} copies (Max is ${limit} for ${matchedUnit?.isBattleline ? 'Battleline' : 'standard'} units).`);
+        validationErrors.push(`Exceeded allowance for "${name}": added ${count} copies (Max is ${limit} for ${matchedUnitIsBattleline ? 'Battleline' : 'standard'} units).`);
       }
     });
 
@@ -2197,7 +2253,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           }
 
           // Check keywords on this unit
-          const keywords = findCatalogUnit(u.unitSlug)?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+          const catalogUnitForEnh = findCatalogUnit(u.unitSlug);
+          const nativeKeywords = catalogUnitForEnh?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+          const keywords = applyKeywordGrants(catalogUnitForEnh?.appDatasheet?.name, nativeKeywords, factionData?.conditionalKeywordGrants, selectedDetachments.map(d => d.name), warlordUnitName);
           const isChar = keywords.some(k => k.toLowerCase() === 'character');
           const isEpicHero = keywords.some(k => k.toLowerCase() === 'epic hero');
 
@@ -3467,8 +3525,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     const costOptions = getDatasheetCosts(matchedCatalog?.appDatasheet, factionData.factionKeywordIds || [], selectedDetachmentId, factionData.slug);
 
     // Enhancements are offered from every selected detachment (filtered by eligibility)
-    const keywords = matchedCatalog?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+    const nativeKeywords = matchedCatalog?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+    const keywords = applyKeywordGrants(matchedCatalog?.appDatasheet?.name, nativeKeywords, factionData.conditionalKeywordGrants, selectedDetachments.map(d => d.name), roster.find(u => u.isWarlord)?.name);
     const isEpicHero = keywords.some(k => k.toLowerCase() === 'epic hero');
+    const isEffectivelyBattleline = keywords.some(k => k.toLowerCase() === 'battleline');
     const eligibleEnhancements = selectedDetachments.flatMap(d => d.enhancements).filter(e => {
       if (isEpicHero) return !!e.isEquipableByEpicHero;
       if (!unit.isCharacter) return !!e.isEquipableByNonCharacterUnit;
@@ -3492,7 +3552,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               <div style={{ display: 'flex', gap: '0.25rem' }}>
                 {unit.isWarlord && <span className="badge badge-faction-pack" style={{ background: 'rgba(226, 168, 38, 0.2)' }}>WARLORD</span>}
                 {unit.isCharacter && <span className="badge badge-character">Character</span>}
-                {unit.isBattleline && <span className="badge badge-infantry" style={{ fontSize: '0.6rem' }}>Battleline</span>}
+                {isEffectivelyBattleline && <span className="badge badge-infantry" style={{ fontSize: '0.6rem' }}>Battleline</span>}
                 {unit.isFactionPack && <span className="badge badge-faction-pack">FP</span>}
                 {unit.splitSquad && <span className="badge badge-infantry" style={{ background: 'rgba(20, 184, 166, 0.2)', color: 'var(--accent-teal)', borderColor: 'rgba(20, 184, 166, 0.4)', fontSize: '0.6rem' }}>SPLIT SQUAD</span>}
               </div>
