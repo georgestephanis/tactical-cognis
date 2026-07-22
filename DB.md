@@ -23,15 +23,16 @@ prompt. The file lives at `public/40k.sqlite` locally and is gitignored.
 
 - **GRDB / SQLite.** A plain SQLite file — open it with anything (`sqlite3`, DB Browser,
   Python's `sqlite3`).
-- `metadata` — single row, single column `dataVersion` (an integer that increments with
-  app data updates; the app surfaces it in the dashboard).
+- `metadata` — a single column `dataVersion` (an integer that increments with app data
+  updates; currently **895**). The value is repeated across a handful of identical rows,
+  so the app reads it with `LIMIT 1` and surfaces it in the dashboard.
 - `grdb_migrations` — GRDB's applied-migration ledger (schema version history).
 - **145 tables, ~398 indexes, ~23 triggers** (stable across recent data versions).
 - A copy extracted with `sqlite3 ... ".backup"` is fully checkpointed — no `-wal`/`-shm`
   sidecar files.
 
 ```bash
-sqlite3 public/40k.sqlite 'SELECT dataVersion FROM metadata;'   # e.g. 886
+sqlite3 public/40k.sqlite 'SELECT dataVersion FROM metadata LIMIT 1;'   # e.g. 895
 sqlite3 public/40k.sqlite '.tables'                             # list all tables
 sqlite3 public/40k.sqlite '.schema datasheet'                   # one table's DDL
 ```
@@ -63,7 +64,7 @@ sqlite3 public/40k.sqlite '.schema datasheet'                   # one table's DD
 
 ## Table map
 
-Approximate row counts from data version 886 — they drift slowly between versions but
+Approximate row counts from data version 895 — they drift slowly between versions but
 the shape doesn't.
 
 ### Datasheets & models — the unit core
@@ -84,8 +85,8 @@ the shape doesn't.
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `wargear_item` | 3,516 | `name`, `wargearType`, `ruleText` — names repeat; items are per-datasheet instances |
-| `wargear_item_profile` | 3,712 | `wargearItemId`, `name`, `type` (ranged/melee), `range`, `attacks`, `ballisticSkill`/`weaponSkill`, `strength`, `armourPenetration`, `damage` |
+| `wargear_item` | 3,517 | `name`, `wargearType`, `ruleText` — names repeat; items are per-datasheet instances |
+| `wargear_item_profile` | 3,714 | `wargearItemId`, `name`, `type` (ranged/melee), `range`, `attacks`, `ballisticSkill`/`weaponSkill`, `strength`, `armourPenetration`, `damage` |
 | `wargear_ability` + `wargear_item_profile_wargear_ability` | — | weapon special rules and their links to profiles |
 | `base_miniature_loadout` / `base_miniature_loadout_wargear_option` | — | baseline gear each miniature starts with |
 | `loadout_choice_set` → `loadout_choice` → `loadout_choice_wargear_item` | — | default loadout + swap options (`limit`, `alternate`) |
@@ -153,6 +154,12 @@ the `roster*` family is no longer ignored by the app: the Army Builder's Import
 modal reads any saved army lists it finds there (see `getSavedDbRosters` /
 `getDbRosterDetail` below) so users can pull their companion-app rosters straight
 into the builder.
+
+> **v895 schema note.** The only DDL changes in the 886 → 895 bump land in these
+> runtime tables — dataset-content tables are unchanged in shape. `roster` gained
+> `forceDispositionId` (FK → `force_disposition` `ON DELETE SET NULL`; not yet read by
+> the import helpers), and `battle` dropped `name` / `bcpUserPlayerPosition` and added
+> `bcpUserIsFirstPlayerInPairing`. Table/index/trigger counts are unchanged (145/398/23).
 
 ## What Tactical Cognis actually queries
 
