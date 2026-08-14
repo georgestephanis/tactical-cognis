@@ -367,3 +367,42 @@ export interface ArmyList {
   detachmentSlug?: string | null;
   detachmentName?: string | null;
 }
+
+// Core Rules book, extracted from rule_section / rule_container / rule_container_component.
+export interface CoreRuleComponent {
+  id: string;
+  type: string;
+  title: string | null;
+  subtitle: string | null;
+  textContent: string | null;
+  trigger: string | null;
+  effect: string | null;
+  imageUrl: string | null;
+  /** For type 'bullets' — the actual list text lives in `bullet_point`, not `textContent`. */
+  bulletPoints: string[];
+}
+
+export interface CoreRuleContainer {
+  id: string;
+  title: string | null;
+  subtitle: string | null;
+  containerType: string;
+  components: CoreRuleComponent[];
+}
+
+export interface CoreRuleSection {
+  id: string;
+  name: string;
+  containers: CoreRuleContainer[];
+}
+
+// FAQ / rules-commentary entry attached to a specific Core Rules container
+// (from faq/faq_config.ruleContainerId). Either question+answer or
+// errataHeader+errataText is populated, depending on the entry's kind.
+export interface CoreRuleFaqEntry {
+  id: string;
+  question: string | null;
+  answer: string | null;
+  errataHeader: string | null;
+  errataText: string | null;
+}

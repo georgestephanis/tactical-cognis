@@ -173,21 +173,58 @@ All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
 | Army-wide rules (`getArmyRules`) | `army_rule`, `army_rule_faction_keyword`, `rule_container_component` |
 | Wargear prose (part of `getUnitsByFaction`) | `wargear_rule` (per-datasheet `rulesText`) |
 | Saved-roster import (`getSavedDbRosters`, `getDbRosterDetail`) | `roster`, `roster_detachment`, `roster_unit`, `roster_unit_miniature`, `roster_unit_wargear_option`, `roster_unit_miniature_wargear_option`, `roster_unit_miniature_enhancement`, `roster_unit_allegiance_ability`, `roster_attached_unit(_roster_unit)`, plus joins to `datasheet`, `miniature`, `wargear_option`, `wargear_item`, `enhancement`, `detachment`, `faction_keyword`, `battle_size` |
+| Core Rules book (`getCoreRules`) | `publication`, `rule_section`, `rule_container`, `rule_container_component`, `bullet_point` |
+| Core-ability hover glossary (`getCoreAbilityGlossary`) | `rule_section`, `rule_container`, `rule_container_component` (scoped to the "24. Core Abilities" chapter) |
+| Core Rules FAQ/commentary asides (`getCoreRulesFaqs`) | `faq`, `faq_config` (scoped to `faq.publicationId = 'Core Rules'`, joined on `faq_config.ruleContainerId`) |
 | Dashboard stats (`getDbStats`) | `metadata` + row counts of the headline tables |
 
 Meta-factions (umbrella keywords that span several sub-faction keywords) are expanded
 in code via `META_FACTION_MAP` in `db.ts`, then widened by following datasheets that
 carry both a parent and child faction keyword.
 
-Notably **unused so far**: the missions family (other than `battle_size`), the FAQ/errata
-tables (`faq`, `faq_config`), and app/user-state tables (`favourite`, `entitlement`,
-`grdb_migrations`). All candidates for future features — see [TODO.md](./TODO.md) for
-the integration roadmap and log. (`invulnerable_save`,
-`datasheet_damage`, `loadout_choice*` swap options, `wargear_limit*`, `wargear_rule`,
-`allied_faction*`, the exclusion/restriction/warlord legality tables, the
-allegiance/army-rule system, and the `roster*` family are now queried and integrated
-across `getUnitsByFaction` and the Army Builder catalog/validation/import. See the
-coverage table above for the query helper that owns each.)
+### Unused tables
+
+Regenerate this list anytime with `comm -23 <(sqlite3 public/40k.sqlite '.tables' | tr -s ' ' '\n' | sort) <(grep -oE '\b[a-z_][a-z0-9_]*\b' src/utils/db.ts | sort -u)` —
+it diffs every table name in the live schema against every identifier `db.ts`
+actually references. As of this writing, 64 of the DB's 145 tables are untouched.
+Most are **not** scorekeeping/match-tracking — they're content-integration gaps in
+areas the app already partially covers:
+
+- **Missions & live battle tracking** (the one cluster that actually is
+  scorekeeping — not wired up, and arguably out of scope for a reference/builder
+  app): `mission_pack`, `mission_preset`, `mission_layout(_linked_deployment)`,
+  `mission_deployment`, `mission_twist`, `primary_mission(_action/_objective*)`,
+  `secondary_mission(_action/_objective*/_restricted_secondary_mission)`,
+  `secondary_objective`, `objective`, `force_disposition(_mission*)`, `battle`,
+  `battle_player(_detachment/_secondary_mission/_turn*)`.
+- **Enhancement eligibility edge cases** (which units/detachments can take which
+  enhancement, beyond what `getDetachmentsByFaction` already resolves):
+  `enhancement_bodyguard_group(_datasheet/_keyword)`, `enhancement_datasheet_ability`,
+  `enhancement_keyword_points_cost`, `enhancement_required_keyword_group_faction_keyword`,
+  `enhancement_required_wargear_item`, `enhancement_wargear_item_profile`.
+- **Allied-faction edge cases** beyond what `getAlliedUnitsForFaction`/`getAlliedLimitsForFaction`
+  cover: the `allied_faction` base table itself (only its child join tables are
+  queried — `canTakeEnhancements`/`requiredWarlordMiniatureId`/`isSiblingFaction`
+  aren't surfaced), `allied_faction_allegiance_ability`,
+  `allied_faction_allowed_warlord_miniature`,
+  `allied_faction_keyword_slotless_keyword_group(_donor_keyword/_receiver_keyword)`,
+  `allied_faction_parent_faction_keyword`.
+- **Detachment/wargear flavor & structure**: `detachment_detail(_bullet_point)`
+  (the companion app's "why take this detachment" bullet list), `detachment_force_disposition`,
+  `detachment_linked_datasheet`, `detachment_required_datasheet`, `wargear_option_group`,
+  `all_model_wargear_choice(_set/_wargear_item)`, `datasheet_sub_ability`.
+- **Narrow legality edge cases**: `keyword_ally_restricting_keyword`,
+  `faction_keyword_mandatory_allegiance_ability`,
+  `army_rule_excluded_from_command_bunker_faction_keyword`, `behaviour_type`
+  (datasheet movement behaviors like Fly/Deep Strike), `stratagem_phase` (which
+  phases a stratagem can be used in — not currently surfaced in `FactionBrowser`).
+- **Roster sub-detail**: `roster_unit_enhancement`, `roster_validation_state` (the
+  `roster*` family is otherwise integrated — see the roster-import row above).
+- **App/user-state** (not gameplay content at all — companion-app account state):
+  `favourite`, `entitlement`, `grdb_migrations`.
+
+All candidates for future features — see [TODO.md](./TODO.md) for the integration
+roadmap and log.
 
 **Schema versions vary between companion-app releases.** Example: in newer DBs
 `wargear_limit` carries `datasheetId`/`wargearItemId`/`limitCount`/`ratioModelCount`;

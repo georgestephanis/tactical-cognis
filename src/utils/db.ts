@@ -1,5 +1,6 @@
 import initSqlJs from 'sql.js';
 import type * as SQL from 'sql.js';
+import type { CoreRuleSection, CoreRuleContainer, CoreRuleComponent, CoreRuleFaqEntry } from '../types/data';
 
 
 // Handle cases where initSqlJs might be nested in a 'default' property due to Vite/ESM mismatch
@@ -1524,3 +1525,191 @@ export const getDbStats = async () => {
     }
   };
 };
+
+/**
+ * The full Core Rules book (movement, phases, terrain, stratagem timing, etc.),
+ * extracted from `rule_section` → `rule_container` → `rule_container_component`
+ * under the `publication` row named "Core Rules". Looked up by name rather than a
+ * hardcoded id since companion-app schema versions vary. Probed defensively —
+ * degrades to an empty array if the publication or any of these tables are missing.
+ */
+export async function getCoreRules(): Promise<CoreRuleSection[]> {
+  try {
+    const pubs = await query("SELECT id FROM publication WHERE name = 'Core Rules' LIMIT 1");
+    if (pubs.length === 0) return [];
+    const pubId = String(pubs[0].id);
+
+    const sections = await query(
+      `SELECT id, name FROM rule_section WHERE publicationId = ? ORDER BY displayOrder`,
+      [pubId]
+    );
+    if (sections.length === 0) return [];
+    const sectionIdList = sections.map(s => `'${s.id}'`).join(',');
+
+    const containers = await query(
+      `SELECT id, ruleSectionId, title, subtitle, containerType
+       FROM rule_container WHERE ruleSectionId IN (${sectionIdList}) ORDER BY displayOrder`
+    );
+
+    let components: Record<string, unknown>[] = [];
+    let bulletPoints: Record<string, unknown>[] = [];
+    if (containers.length > 0) {
+      const containerIdList = containers.map(c => `'${c.id}'`).join(',');
+      components = await query(
+        `SELECT id, ruleContainerId, type, title, subtitle, textContent, trigger, effect, imageUrl
+         FROM rule_container_component WHERE ruleContainerId IN (${containerIdList}) ORDER BY displayOrder`
+      );
+
+      // type 'bullets' components store their actual list text in `bullet_point`,
+      // not `textContent` (which just holds a placeholder for those rows).
+      const componentIdList = components.map(c => `'${c.id}'`).join(',');
+      if (componentIdList.length > 0) {
+        bulletPoints = await query(
+          `SELECT ruleContainerComponentId, text
+           FROM bullet_point WHERE ruleContainerComponentId IN (${componentIdList}) ORDER BY displayOrder`
+        );
+      }
+    }
+
+    const bulletsByComponent = new Map<string, string[]>();
+    bulletPoints.forEach(b => {
+      const componentId = String(b.ruleContainerComponentId);
+      const list = bulletsByComponent.get(componentId) ?? [];
+      list.push(String(b.text));
+      bulletsByComponent.set(componentId, list);
+    });
+
+    const componentsByContainer = new Map<string, CoreRuleComponent[]>();
+    components.forEach(c => {
+      const containerId = String(c.ruleContainerId);
+      const list = componentsByContainer.get(containerId) ?? [];
+      list.push({
+        id: String(c.id),
+        type: String(c.type),
+        title: c.title != null ? String(c.title) : null,
+        subtitle: c.subtitle != null ? String(c.subtitle) : null,
+        textContent: c.textContent != null ? String(c.textContent) : null,
+        trigger: c.trigger != null ? String(c.trigger) : null,
+        effect: c.effect != null ? String(c.effect) : null,
+        imageUrl: c.imageUrl != null ? String(c.imageUrl) : null,
+        bulletPoints: bulletsByComponent.get(String(c.id)) ?? [],
+      });
+      componentsByContainer.set(containerId, list);
+    });
+
+    const containersBySection = new Map<string, CoreRuleContainer[]>();
+    containers.forEach(c => {
+      const sectionId = String(c.ruleSectionId);
+      const list = containersBySection.get(sectionId) ?? [];
+      list.push({
+        id: String(c.id),
+        title: c.title != null ? String(c.title) : null,
+        subtitle: c.subtitle != null ? String(c.subtitle) : null,
+        containerType: String(c.containerType),
+        components: componentsByContainer.get(String(c.id)) ?? [],
+      });
+      containersBySection.set(sectionId, list);
+    });
+
+    return sections.map(s => ({
+      id: String(s.id),
+      name: String(s.name),
+      containers: containersBySection.get(String(s.id)) ?? [],
+    }));
+  } catch (err) {
+    console.warn('Skipping core rules (publication/tables missing or incompatible):', err);
+    return [];
+  }
+}
+
+/**
+ * Hover-glossary source for bracketed core-ability keywords (e.g. `[DEVASTATING
+ * WOUNDS]`, `[SUSTAINED HITS]`) referenced throughout rules text as `<k>[X]</k>`.
+ * Pulled from the Core Rules book's "24. Core Abilities" chapter — each container
+ * there is titled with the bracketed keyword and its components hold the actual
+ * definition prose. Keyed by the bracket contents, normalized (trimmed, uppercased,
+ * brackets stripped) so callers can look up by the keyword text alone. Probed
+ * defensively like `getCoreRules`.
+ */
+export async function getCoreAbilityGlossary(): Promise<Record<string, string>> {
+  try {
+    const sections = await query("SELECT id FROM rule_section WHERE name = '24. Core Abilities' LIMIT 1");
+    if (sections.length === 0) return {};
+    const sectionId = String(sections[0].id);
+
+    const containers = await query(
+      `SELECT id, title FROM rule_container WHERE ruleSectionId = ? AND title IS NOT NULL`,
+      [sectionId]
+    );
+    if (containers.length === 0) return {};
+    const containerIdList = containers.map(c => `'${c.id}'`).join(',');
+
+    const components = await query(
+      `SELECT ruleContainerId, textContent, trigger, effect
+       FROM rule_container_component WHERE ruleContainerId IN (${containerIdList}) ORDER BY displayOrder`
+    );
+
+    const partsByContainer = new Map<string, string[]>();
+    components.forEach(c => {
+      const containerId = String(c.ruleContainerId);
+      const parts = partsByContainer.get(containerId) ?? [];
+      if (c.textContent) parts.push(String(c.textContent));
+      if (c.trigger) parts.push(String(c.trigger));
+      if (c.effect) parts.push(String(c.effect));
+      partsByContainer.set(containerId, parts);
+    });
+
+    const glossary: Record<string, string> = {};
+    containers.forEach(c => {
+      const key = String(c.title).replace(/^\[|\]$/g, '').trim().toUpperCase();
+      const parts = partsByContainer.get(String(c.id)) ?? [];
+      if (key && parts.length > 0) glossary[key] = parts.join('\n\n');
+    });
+    return glossary;
+  } catch (err) {
+    console.warn('Skipping core ability glossary (table missing or incompatible):', err);
+    return {};
+  }
+}
+
+/**
+ * FAQ / rules-commentary entries attached to specific Core Rules containers, via
+ * `faq_config.ruleContainerId`. Keyed by container id so the Core Rules view can
+ * render them as an aside under the relevant subsection. Scoped to the "Core
+ * Rules" publication's own FAQ set (rather than datasheet/stratagem FAQs, which
+ * share the same `faq` table but link via other `faq_config` columns). Probed
+ * defensively like `getCoreRules`.
+ */
+export async function getCoreRulesFaqs(): Promise<Record<string, CoreRuleFaqEntry[]>> {
+  try {
+    const pubs = await query("SELECT id FROM publication WHERE name = 'Core Rules' LIMIT 1");
+    if (pubs.length === 0) return {};
+    const pubId = String(pubs[0].id);
+
+    const rows = await query(
+      `SELECT fc.id, fc.ruleContainerId, f.question, f.answer, f.errataHeader, f.errataText
+       FROM faq_config fc
+       JOIN faq f ON f.id = fc.faqId
+       WHERE fc.ruleContainerId IS NOT NULL AND f.publicationId = ?
+       ORDER BY f.displayOrder`,
+      [pubId]
+    );
+
+    const byContainer: Record<string, CoreRuleFaqEntry[]> = {};
+    rows.forEach(r => {
+      const containerId = String(r.ruleContainerId);
+      const list = byContainer[containerId] ?? (byContainer[containerId] = []);
+      list.push({
+        id: String(r.id),
+        question: r.question != null ? String(r.question) : null,
+        answer: r.answer != null ? String(r.answer) : null,
+        errataHeader: r.errataHeader != null ? String(r.errataHeader) : null,
+        errataText: r.errataText != null ? String(r.errataText) : null,
+      });
+    });
+    return byContainer;
+  } catch (err) {
+    console.warn('Skipping core rules FAQ/errata (table missing or incompatible):', err);
+    return {};
+  }
+}

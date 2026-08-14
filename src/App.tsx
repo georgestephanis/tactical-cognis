@@ -5,13 +5,14 @@ import { FactionBrowser } from './components/FactionBrowser';
 import { UnitDetails } from './components/UnitDetails';
 import { DeepAnalysis } from './components/DeepAnalysis';
 import { ArmyBuilder } from './components/ArmyBuilder';
+import { CoreRules } from './components/CoreRules';
 import { DatabaseUploadView } from './components/DatabaseUploadView';
 import type { MergedUnit } from './types/data';
 import { loadAndMergeFaction } from './utils/dataMapper';
 import { initDatabase, getDbStats } from './utils/db';
 
 function App() {
-  const [view, setView] = useState<'dashboard' | 'faction' | 'analysis' | 'builder'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'faction' | 'analysis' | 'builder' | 'rules'>('dashboard');
   const [activeFactionSlug, setActiveFactionSlug] = useState<string | null>(null);
   const [activeUnit, setActiveUnit] = useState<MergedUnit | null>(null);
   const [dbVersion, setDbVersion] = useState<number>(875);
@@ -57,6 +58,8 @@ function App() {
         setView('builder');
       } else if (v === 'analysis') {
         setView('analysis');
+      } else if (v === 'rules') {
+        setView('rules');
       } else if (v === 'faction' && f) {
         setActiveFactionSlug(f);
         setView('faction');
@@ -123,6 +126,8 @@ function App() {
       window.history.pushState({ view: 'builder' }, '', '?view=builder');
     } else if (view === 'analysis' && currentView !== 'analysis') {
       window.history.pushState({ view: 'analysis' }, '', '?view=analysis');
+    } else if (view === 'rules' && currentView !== 'rules') {
+      window.history.pushState({ view: 'rules' }, '', '?view=rules');
     }
   }, [view, activeFactionSlug, activeUnit, isDbLoadedState]);
 
@@ -143,6 +148,9 @@ function App() {
     } else if (view === 'builder') {
       title = 'Force Roster Builder | WH40k Tactical Cognis';
       description = 'Construct competitive army lists, assign detachments, attach leaders and supports, and validate points limitations in real-time.';
+    } else if (view === 'rules') {
+      title = 'Core Rules Reference | WH40k Tactical Cognis';
+      description = 'Browse and print the full Warhammer 40,000 core rules, extracted from the loaded companion-app database.';
     }
 
     document.title = title;
@@ -221,6 +229,13 @@ function App() {
             >
               <Target size={14} /> Global Analysis
             </button>
+            <button
+              id="nav-btn-rules"
+              className={`tab-btn ${view === 'rules' ? 'active' : ''}`}
+              onClick={() => setView('rules')}
+            >
+              Core Rules
+            </button>
           </nav>
         )}
       </header>
@@ -256,6 +271,10 @@ function App() {
 
             {view === 'analysis' && (
               <DeepAnalysis />
+            )}
+
+            {view === 'rules' && (
+              <CoreRules />
             )}
           </>
         )}

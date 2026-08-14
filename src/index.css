@@ -1094,6 +1094,50 @@ code {
     display: none !important;
   }
 
+  /* Core Rules page: strip the TOC/dark theme, force plain black-on-white text */
+  .core-rules-layout {
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  .core-rules-content {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .core-rules-doc,
+  .core-rules-doc * {
+    background: transparent !important;
+    color: #000 !important;
+    border-color: #000 !important;
+    box-shadow: none !important;
+  }
+
+  .core-rules-doc {
+    max-width: 100% !important;
+  }
+
+  /* Containers can span many paragraphs — too tall to keep whole on one page,
+     so only the heading (not the container) is protected from being orphaned. */
+  .core-rules-container-title {
+    page-break-after: avoid;
+  }
+
+  .core-rules-section-title {
+    page-break-after: avoid;
+  }
+
+  /* Long sections/boxes are allowed to split across a page break — that beats a
+     half-page gap — but keep at least 3 lines together at the top or bottom of
+     a page so a paragraph never gets stranded down to just 1-2 lines. */
+  .core-rules-text,
+  .core-rules-faq-q,
+  .core-rules-faq-a,
+  .core-rules-doc li {
+    orphans: 3;
+    widows: 3;
+  }
+
   .print-page-break {
     page-break-before: always !important;
     break-before: page !important;
@@ -1791,4 +1835,233 @@ code {
   text-decoration-color: var(--accent-teal, currentColor);
   text-underline-offset: 3px;
   cursor: help;
+}
+
+/* Core Rules reference page */
+.core-rules-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.core-rules-toc {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 1.5rem 1rem;
+  border-right: 1px solid var(--glass-border);
+  background: var(--bg-secondary);
+}
+
+.core-rules-toc-section {
+  margin-bottom: 1.25rem;
+}
+
+.core-rules-toc-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent-gold);
+  margin-bottom: 0.4rem;
+}
+
+.core-rules-toc-link {
+  display: block;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.core-rules-toc-link:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.core-rules-toc-number {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-right: 0.4rem;
+}
+
+.core-rules-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+}
+
+.core-rules-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.core-rules-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.core-rules-page-header .button,
+.core-rules-page-header .button-outline {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.core-rules-faq-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.core-rules-doc {
+  max-width: 760px;
+  color: var(--text-primary);
+}
+
+.core-rules-section {
+  margin-bottom: 2.5rem;
+}
+
+.core-rules-section-title {
+  font-size: 1.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--accent-gold);
+  border-bottom: 2px solid var(--glass-border);
+  padding-bottom: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.core-rules-container {
+  margin-bottom: 1.5rem;
+}
+
+.core-rules-container-title {
+  font-size: 1.05rem;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.core-rules-container-number {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  margin-right: 0.5rem;
+}
+
+.core-rules-header {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent-teal);
+  margin: 1rem 0 0.35rem;
+}
+
+.core-rules-text {
+  line-height: 1.6;
+  margin: 0 0 0.75rem;
+  color: var(--text-primary);
+}
+
+.core-rules-text-bold {
+  font-weight: 600;
+}
+
+.core-rules-box {
+  border-left: 3px solid var(--glass-border);
+  padding-left: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.core-rules-box .core-rules-text:last-child {
+  margin-bottom: 0;
+}
+
+.core-rules-box-title {
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.core-rules-box-subtitle {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.core-rules-lore {
+  font-style: italic;
+  border-left-color: var(--accent-teal);
+}
+
+.core-rules-quote {
+  font-style: italic;
+  color: var(--text-secondary);
+  border-left: 3px solid var(--glass-border);
+  padding-left: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.core-rules-bullets {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.core-rules-image {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 0.5rem 0 1rem;
+  display: block;
+}
+
+.core-rules-faq {
+  margin: 0.5rem 0 1rem;
+  padding: 0.6rem 0.9rem;
+  border-left: 3px solid var(--accent-gold);
+  background: rgba(197, 160, 89, 0.08);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+}
+
+.core-rules-faq-summary {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  color: var(--accent-gold);
+  cursor: pointer;
+}
+
+.core-rules-faq[open] .core-rules-faq-summary {
+  margin-bottom: 0.5rem;
+}
+
+.core-rules-faq-entry + .core-rules-faq-entry {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--glass-border);
+}
+
+.core-rules-faq-q,
+.core-rules-faq-a {
+  margin: 0 0 0.25rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
