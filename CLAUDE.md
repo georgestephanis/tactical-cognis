@@ -24,6 +24,8 @@ npm run dev                   # Vite dev server, http://localhost:5174
 npm run build                 # tsc -b && vite build → dist/ (may include local 40k.sqlite — don't host this one)
 npm run build:distributable   # IP-free static build → dist-distributable/ — this is the one to host/deploy
 npm run db:find                # Mac only: scan ~/Library/Containers for the companion app's db, copy to public/40k.sqlite
+npm run db:sanitize            # Copy the DB minus companion-app personal data (rosters, favourites, entitlements) → public/40k-scrubbed.sqlite
+npm run refresh                # Mac only: db:find + db:sanitize --force — pull the latest companion DB and re-scrub it
 npm run lint                   # eslint .
 npm test                       # Run zero-dependency mathhammer unit tests
 ```

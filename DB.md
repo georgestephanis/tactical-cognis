@@ -154,6 +154,38 @@ modal reads any saved army lists it finds there (see `getSavedDbRosters` /
 `getDbRosterDetail` below) so users can pull their companion-app rosters straight
 into the builder.
 
+## Sanitizing a database for sharing
+
+`npm run db:sanitize` writes a **copy** with the companion app's user state removed
+(saved rosters, battle-tracker rows, favourites, and `entitlement` — the store /
+subscription rows), then `VACUUM`s the result. The source database is never
+modified; the script refuses to run if input and output are the same path.
+
+```bash
+npm run db:sanitize                                   # public/40k.sqlite → public/40k-scrubbed.sqlite
+npm run db:sanitize -- ~/db.sqlite                    # any input → ~/db-scrubbed.sqlite alongside it
+npm run db:sanitize -- in.sqlite out.sqlite --force   # explicit paths, overwrite existing output
+npm run db:sanitize -- --drop-unused                  # also drop tables db.ts never queries
+```
+
+`npm run refresh` (Mac only) chains the two: `db:find` re-pulls the companion app's
+current `db.sqlite` into `public/40k.sqlite`, then `db:sanitize --force` regenerates
+`public/40k-scrubbed.sqlite` over the previous one. Both the source's modification
+time and its `metadata.dataVersion` are printed, so a pull that didn't actually
+pick up anything new is visible — `db:find` exits 0 when it finds no companion
+database, and `refresh` will happily re-scrub the existing (stale) copy in that case.
+
+`battle_size` is gameplay content and is always kept, despite the `battle` prefix.
+`--drop-unused` derives its list from `src/utils/db.ts` at runtime (the same diff as
+the `comm` recipe under [Unused tables](#unused-tables)), so it tracks coverage
+automatically — but it also removes the mission/scoring tables the roadmap wants,
+for only a couple of MB, so the default leaves them in place.
+
+Dropping the `roster*` family disables the Army Builder's "import from database"
+list; `getSavedDbRosters` probes `sqlite_master` first and returns nothing rather
+than erroring. Sanitizing removes *your* data — it does not make Games Workshop's
+game data yours to redistribute.
+
 ## What Tactical Cognis actually queries
 
 All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
