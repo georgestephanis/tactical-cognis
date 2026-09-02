@@ -3,17 +3,36 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const rootDir = path.join(__dirname, '..');
-const localDbPath = path.join(rootDir, 'public', '40k.sqlite');
-const backupDbPath = path.join(rootDir, '40k.sqlite.bak'); // Store backup outside of public folder so Vite doesn't copy it
+const publicDir = path.join(rootDir, 'public');
+// Backups are stashed outside public/ so Vite never copies them into the build.
+const stashDir = path.join(rootDir, '.db-stash');
+
+// Anything that is, or belongs to, a SQLite database. `-wal`/`-shm`/`-journal`
+// sidecars appear whenever the DB is opened by a tool that doesn't checkpoint on
+// close (a `sqlite3` shell session, the companion app itself), and they are just
+// as much game data as the `.sqlite` file — they must never reach the bundle.
+//
+// The `.bak` arm is deliberately scoped to database backups (`40k.sqlite.bak`,
+// left behind by earlier versions of this script) rather than every `.bak` file,
+// so an unrelated backup in public/ isn't swept up.
+const DB_FILE_RE = /\.(sqlite|sqlite3|db)(-wal|-shm|-journal|\.bak)?$/i;
 
 console.log("=== Packaging IP-Free Distributable Application ===\n");
 
-// 1. Temporarily hide local database from compilation
-let dbWasHidden = false;
-if (fs.existsSync(localDbPath)) {
-  console.log("Hiding local database to prevent IP leakage...");
-  fs.renameSync(localDbPath, backupDbPath);
-  dbWasHidden = true;
+// 1. Temporarily hide every local database file from compilation.
+const stashed = [];
+if (fs.existsSync(publicDir)) {
+  const dbFiles = fs.readdirSync(publicDir).filter(f => DB_FILE_RE.test(f));
+  if (dbFiles.length > 0) {
+    fs.mkdirSync(stashDir, { recursive: true });
+    console.log(`Hiding ${dbFiles.length} local database file(s) to prevent IP leakage...`);
+    dbFiles.forEach(f => {
+      const from = path.join(publicDir, f);
+      const to = path.join(stashDir, f);
+      fs.renameSync(from, to);
+      stashed.push({ from, to });
+    });
+  }
 }
 
 try {
@@ -33,28 +52,44 @@ try {
   console.log("Creating dedicated distributable build folder...");
   fs.renameSync(distPath, distDistPath);
 
-  // 4. Verify no database/backup files are present in distribution (recursive)
+  // 4. Sweep the output for any database file that still slipped through.
   const distFiles = fs.readdirSync(distDistPath, { recursive: true });
   distFiles.forEach(f => {
     const rel = String(f);
-    const base = path.basename(rel);
-    if (base.endsWith('.sqlite') || base.endsWith('.bak')) {
+    if (DB_FILE_RE.test(path.basename(rel))) {
       console.log(`Removing compiled data file to prevent IP leakage: ${rel}`);
       fs.unlinkSync(path.join(distDistPath, rel));
     }
   });
 
+  // 5. Re-scan and fail the build if anything matched — the "no game data"
+  // guarantee is the whole point of this script, so it must be asserted, not
+  // assumed. A stale bundle is far better than a bundle that ships GW IP.
+  const leftovers = fs.readdirSync(distDistPath, { recursive: true })
+    .map(String)
+    .filter(f => DB_FILE_RE.test(path.basename(f)));
+  if (leftovers.length > 0) {
+    throw new Error(
+      `Refusing to publish: database files remain in the bundle:\n  ${leftovers.join('\n  ')}`
+    );
+  }
+
   console.log("\n🎉 IP-Free distribution bundle generated successfully!");
   console.log(`  Output directory: ${distDistPath}`);
-  console.log(`  Contains ONLY: HTML, JS, CSS, and WASM binaries (No game data).`);
+  console.log(`  Verified: no .sqlite/.db files or -wal/-shm/-journal sidecars present.`);
 
 } catch (err) {
   console.error("Compilation failed:", err);
   process.exitCode = 1;
 } finally {
-  // 5. Restore original database for local development
-  if (dbWasHidden && fs.existsSync(backupDbPath)) {
-    console.log("Restoring local database for development...");
-    fs.renameSync(backupDbPath, localDbPath);
+  // 6. Restore the local databases for development, whatever happened above.
+  if (stashed.length > 0) {
+    console.log(`Restoring ${stashed.length} local database file(s) for development...`);
+    stashed.forEach(({ from, to }) => {
+      if (fs.existsSync(to)) fs.renameSync(to, from);
+    });
+    if (fs.existsSync(stashDir) && fs.readdirSync(stashDir).length === 0) {
+      fs.rmdirSync(stashDir);
+    }
   }
 }

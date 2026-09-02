@@ -46,6 +46,10 @@ The UI audits the roster on every change and displays active warnings:
 - **Keyword restriction caps ("0-1 X"):** Counts roster units carrying a restriction group's keywords (`factionData.keywordRestrictionGroups`) and flags over/under the group's limit, honoring per-detachment min/max overrides, a Warlord gate, and a declared sub-faction keyword that lifts the cap (e.g. Ynnari).
 - **Mandatory Warlord (detachment):** When a detachment names a mandatory Warlord unit, flags if that unit is absent or not designated Warlord.
 - **Allegiance choices:** Flags unsatisfied mandatory allegiance groups and picks that violate a group's min/max.
+- **Force disposition:** A detachment's disposition, crossed with the opponent's, selects the primary mission. Nearly every detachment maps to exactly one (shown read-only), but where a detachment offers a choice the builder renders a selector and flags the roster until one is picked. The pick is persisted per detachment id on `ArmyList.selectedForceDispositionIds`.
+- **Warhammer Legends datasheets:** Flags any roster unit whose datasheet has `isLegends` set. Legends units are legal in open and narrative play but never in matched play, so they are surfaced as a validation error rather than blocked outright — they can still be added deliberately (or arrive via a roster import), and the error names each one.
+
+The catalogue itself hides Combat Patrol datasheets, zero-points datasheets, and (behind an *Include Legends* toggle, shown only for factions that have any) Warhammer Legends datasheets. Legends units that are shown carry a `LEGENDS` badge.
 
 ### 4. Roster Import
 The Import modal offers two paths that converge on the same matching pipeline (`applyParsedRoster`):

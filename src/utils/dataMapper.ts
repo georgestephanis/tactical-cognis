@@ -13,7 +13,8 @@ import type {
   DetachmentWarlordRule,
   AllegianceGroup,
   AllegianceAbility,
-  ArmyRule
+  ArmyRule,
+  ForceDisposition
 } from '../types/data';
 import {
   initDatabase,
@@ -141,6 +142,23 @@ export function getDatasheetCosts(
  */
 const factionCache = new Map<string, MergedFaction>();
 
+
+/**
+ * Decides whether a datasheet belongs to a Combat Patrol box.
+ *
+ * Prefers `publication.isCombatPatrol`. Older companion DBs predate that column,
+ * so the publication-name heuristic remains as a fallback, and the zero-points
+ * check as a last resort for datasheets carrying no costed composition at all.
+ *
+ * Shared by the primary-faction and allied-unit paths so the two can't drift —
+ * an allied Combat Patrol datasheet must be recognised the same way as any other.
+ */
+function resolveIsCombatPatrol(ds: Datasheet, minPoints: number): boolean {
+  return !!ds.isCombatPatrol
+    || !!ds.publication?.toLowerCase().includes('combat patrol')
+    || (minPoints === 0 && (ds.compositions?.length ?? 0) > 0);
+}
+
 /**
  * Load and merge data from SQLite for a selected faction slug.
  */
@@ -220,7 +238,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       maxPts = Math.max(...points);
     }
 
-    const isCombatPatrol = ds.publication?.toLowerCase().includes('combat patrol') || (minPts === 0 && ds.compositions.length > 0);
+    const isCombatPatrol = resolveIsCombatPatrol(ds, minPts);
 
     mergedUnits.push({
       name: String(ds.name),
@@ -228,6 +246,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       appDatasheet: ds,
       pointsRange: { min: minPts, max: maxPts },
       isCombatPatrol: isCombatPatrol,
+      isLegends: !!ds.isLegends,
       isFactionPack: false, // Will be updated if we add FP support back
     });
   });
@@ -251,7 +270,8 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       slug: String(ds.slug),
       appDatasheet: ds,
       pointsRange: { min: minPts, max: maxPts },
-      isCombatPatrol: false,
+      isCombatPatrol: resolveIsCombatPatrol(ds, minPts),
+      isLegends: !!ds.isLegends,
       isFactionPack: false,
       isAllied: true,
       requiredDetachmentIds: (u as { requiredDetachmentIds?: string[] }).requiredDetachmentIds || [],
@@ -280,6 +300,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       enhancements: AppEnhancement[];
       stratagems: AppStratagem[];
       restrictions: string[];
+      forceDispositions?: ForceDisposition[];
     };
 
     const id = String(appDet.id);
@@ -310,6 +331,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
         })),
         stratagems: appDet.stratagems || [],
         restrictions: appDet.restrictions || [],
+        forceDispositions: appDet.forceDispositions || [],
       });
     }
   });

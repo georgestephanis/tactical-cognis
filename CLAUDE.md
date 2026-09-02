@@ -42,12 +42,23 @@ Prefer this pattern (plain asserts, zero-dependency, run via `tsx`) if you add c
 
 `npm run dev` / `npm run build` both run `copy-data.js` first (via `predev`/`prebuild`) to stage the `sql.js` WASM runtime into `public/`.
 
+## 11th edition data (version 946+)
+
+`Codex: Orks` is the first 11th-edition book in the dataset and introduced two things worth knowing before touching the data layer or any damage aggregation. Both are documented in full in `DB.md`.
+
+- **`datasheet.isLegends`** — Warhammer Legends datasheets. They carry ordinary faction keywords and real points, so they are indistinguishable from codex units unless you read the flag. Surfaced as `MergedUnit.isLegends`; hidden by default, badged where shown, and flagged by Army Builder validation (not legal in matched play). Mirror the Combat Patrol handling when adding a new consumer.
+- **`wargear_item_profile.hunterProfileKeyword`** — a conditional "Hunter" statline usable only against listed target keywords, paired with a `Standard` line. **Anything that sums a weapon's profiles must route through `selectProfilesForTarget()`** — summing a Hunter weapon's profiles roughly doubles its output. Parsed into `WeaponProfile.hunterKeywords` by `parseHunterKeywords()` in `db.ts`.
+
+- **`detachment_force_disposition`** — a detachment's force disposition, crossed with the opponent's, picks the primary mission. Nearly all map to exactly one, but a detachment **may offer a choice** (exactly one detachment does today, added by the 11th-edition codex). Anything that treats disposition as single-valued will be wrong for that case — `MergedDetachment.forceDispositions` is an array, and the Army Builder validates that a choice has been made.
+
+**Schema drift:** uploaded databases come from many companion-app releases. Any column added by a newer release must be probed with the cached `hasColumn(table, column)` helper in `db.ts` and folded into the projection conditionally (`'0 AS isLegends'` etc.) — never selected unguarded, or one missing column fails the whole faction load. Verify changes against both a current DB and a copy with the new columns dropped.
+
 ## Architecture
 
 - `src/App.tsx` — top-level router. No react-router; view state is synced to `?view=&faction=&unit=` query params by hand via `history.pushState`/`popstate`.
 - `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers — including allied-unit helpers (`getAlliedUnitsForFaction`/`getAlliedLimitsForFaction`), saved-roster import helpers (`getSavedDbRosters`/`getDbRosterDetail`, which read the user's own `roster*` tables), and the list-legality/allegiance helpers that feed Army Builder validation (`getConditionalKeywordGrants`, `getExcludedDatasheets`, `getKeywordRestrictionGroups`, `getDetachmentWarlordRules`, `getAllegianceGroups`, `getArmyRules`). Companion-app schema versions vary, so probe version-sensitive tables with `PRAGMA table_info` and degrade gracefully rather than letting one missing column fail a whole load (see the `wargear_limit` handling — every legality helper is `try/catch`-guarded the same way). The database schema is documented in `DB.md` and the data layer details are mapped in [docs/data_architecture.md](./docs/data_architecture.md).
 - `src/utils/dataMapper.ts` — maps raw DB rows into the `MergedUnit`/`MergedFaction` shapes the UI consumes.
-- `src/utils/mathhammer.ts` — pure combat-math engine (hit/wound/save/damage expectation, devastating wounds, FNP, AP reduction, etc.), no DB or React dependency. The mathematical equations are documented in [docs/mathhammer_engine.md](./docs/mathhammer_engine.md).
+- `src/utils/mathhammer.ts` — pure combat-math engine (hit/wound/save/damage expectation, devastating wounds, FNP, AP reduction, etc.), no DB or React dependency. Also owns conditional-profile selection (`profileAppliesToTarget`, `selectProfilesForTarget`) — keep that logic here, structural and dependency-free, so it stays unit-testable. The mathematical equations are documented in [docs/mathhammer_engine.md](./docs/mathhammer_engine.md).
 - `src/components/` — one component per view (`Dashboard`, `FactionBrowser`, `UnitDetails`, `ArmyBuilder`, `DeepAnalysis`) plus `DatabaseUploadView` for the no-DB fallback and `RulesText`, the shared safe renderer for the DB's inline rules markup (DOMParser → React nodes, no `dangerouslySetInnerHTML`). Detailed view maps are in [views/README.md](./views/README.md).
 - This is a browser-only app — no Electron, no desktop shell. `scripts/find-db.cjs` (`npm run db:find`) is a plain Node script for local dev convenience only; it never runs as part of the build.
 

@@ -25,6 +25,10 @@ When in Simulator mode, the selected weapon profile is run against five standard
 - **VEQ (Medium Vehicle Equivalent):** T10, 3+ Save (no invulnerable save), 12 Wounds, unit size 1
 - **HEAVY (Heavy Vehicle / Monster):** T12, 2+ Save (no invulnerable save), 16 Wounds, unit size 1
 
+**Conditional ("Hunter") profiles.** Some weapons carry a `Hunter` statline that is only usable against targets with specific keywords (e.g. `MONSTER`/`VEHICLE`), paired with a `Standard` statline for everything else. Where such a profile exists:
+- The datasheet weapon table badges it with the condition (`vs MONSTER/VEHICLE`).
+- In the simulator, preset rows the selected profile cannot legally target are greyed out and show *"Profile not usable — requires …"* instead of damage figures, via `profileAppliesToTarget()`.
+
 The simulator runs calculations for:
 - **Expected Attacks:** Adjusts for Blast mechanics vs the target unit size.
 - **Expected Hits:** Applies skill checks, re-rolls, Torrent auto-hits, and Sustained Hits.

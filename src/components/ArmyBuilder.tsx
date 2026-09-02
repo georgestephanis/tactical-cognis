@@ -1368,6 +1368,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // allegiance validation. Persisted with the roster.
   const [selectedAllegianceAbilityIds, setSelectedAllegianceAbilityIds] = useState<string[]>([]);
   const [selectedSubfactionKeywords, setSelectedSubfactionKeywords] = useState<string[]>([]);
+  // Chosen force disposition per detachment id. Only detachments offering more
+  // than one need an entry; a single-disposition detachment resolves implicitly.
+  const [selectedForceDispositionIds, setSelectedForceDispositionIds] = useState<Record<string, string>>({});
   const [battleSizes, setBattleSizes] = useState<BattleSize[]>([]);
   const [roster, setRoster] = useState<RosterUnit[]>([]);
   const [pointLimit, setPointLimit] = useState<number>(2000);
@@ -1377,6 +1380,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const [factionData, setFactionData] = useState<MergedFaction | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [catalogRole, setCatalogRole] = useState<string>('all');
+  // Legends datasheets are hidden from the catalog by default — they're legal
+  // in open/narrative play but not matched play, so adding one raises a
+  // validation error rather than being silently allowed.
+  const [showLegends, setShowLegends] = useState(false);
 
   const findCatalogUnit = (slug: string) => {
     if (!factionData) return undefined;
@@ -1453,6 +1460,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       detachmentSlugs: selectedDetachmentSlugs,
       selectedAllegianceAbilityIds,
       selectedSubfactionKeywords,
+      selectedForceDispositionIds,
       pointLimit,
       units: roster
     };
@@ -1483,6 +1491,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     setSelectedDetachmentSlugs(army.detachmentSlugs);
     setSelectedAllegianceAbilityIds(army.selectedAllegianceAbilityIds ?? []);
     setSelectedSubfactionKeywords(army.selectedSubfactionKeywords ?? []);
+    setSelectedForceDispositionIds(army.selectedForceDispositionIds ?? {});
     setPointLimit(army.pointLimit);
     setCustomLimitInput(army.pointLimit.toString());
     setIsCustomLimit(![1000, 2000, 3000].includes(army.pointLimit));
@@ -2189,6 +2198,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // Filter list of catalog units
   const filteredCatalog = factionData ? [...factionData.units, ...(factionData.alliedUnits || [])].filter(unit => {
     if (unit.isCombatPatrol || unit.pointsRange.min === 0) return false;
+    if (!showLegends && unit.isLegends) return false;
 
     // Detachment gating for allied units
     if (unit.isAllied && unit.requiredDetachmentIds && unit.requiredDetachmentIds.length > 0) {
@@ -2256,6 +2266,37 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     } else if (warlords.length > 1) {
       validationErrors.push(`Multiple Warlords designated (${warlords.length}). You may only have one Warlord.`);
     }
+
+    // 2a. Warhammer Legends datasheets. Legal in open and narrative play, but
+    // never in matched play — so they're surfaced as a validation error rather
+    // than blocked outright. `datasheet.isLegends` arrived with the 11th-edition
+    // data (Codex: Orks is the first book to ship them).
+    const legendsInRoster = Array.from(new Set(
+      roster
+        .filter(u => {
+          const unit = factionData.units.find(fu => fu.slug === u.unitSlug)
+            || factionData.alliedUnits?.find(fu => fu.slug === u.unitSlug);
+          return unit?.isLegends;
+        })
+        .map(u => u.name)
+    ));
+    if (legendsInRoster.length > 0) {
+      validationErrors.push(
+        `Legends datasheet${legendsInRoster.length === 1 ? '' : 's'} in roster: ${legendsInRoster.map(n => `"${n}"`).join(', ')}. Warhammer Legends units are not legal in matched play.`
+      );
+    }
+
+    // 2a-ii. Force disposition. Where a detachment offers a choice of dispositions,
+    // one must be declared — it determines the primary mission via
+    // `force_disposition_mission`, so leaving it unset leaves the list incomplete.
+    selectedDetachments.forEach(d => {
+      const options = d.forceDispositions || [];
+      if (options.length > 1 && !selectedForceDispositionIds[d.id]) {
+        validationErrors.push(
+          `${d.name} offers a choice of force disposition (${options.map(o => o.name).join(' or ')}) — one must be selected.`
+        );
+      }
+    });
 
     // 2b. Excluded datasheets — units barred from the faction outright
     // (faction_keyword_excluded_datasheet) or from a selected detachment
@@ -2616,6 +2657,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   setSelectedDetachmentSlugs([]);
                   setSelectedAllegianceAbilityIds([]);
                   setSelectedSubfactionKeywords([]);
+                  setSelectedForceDispositionIds({});
                   if (!slug) setFactionData(null);
                 }}
                 style={{
@@ -2931,6 +2973,40 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   </div>
                 )}
 
+                {/* Force disposition. A detachment's disposition, crossed with the
+                    opponent's, selects the primary mission. Almost every detachment
+                    offers exactly one (shown read-only); where it offers several the
+                    player must choose. */}
+                {selectedDetachments.filter(d => (d.forceDispositions || []).length > 0).map(d => {
+                  const options = d.forceDispositions || [];
+                  const isChoice = options.length > 1;
+                  const chosen = isChoice
+                    ? (selectedForceDispositionIds[d.id] || '')
+                    : options[0].id;
+                  return (
+                    <div key={`fd-${d.slug}`} className="input-group" style={{ marginTop: '0.5rem' }}>
+                      <label style={{ fontSize: '0.8rem' }}>
+                        Force Disposition <span style={{ color: 'var(--text-muted)' }}>— {d.name}</span>
+                        {isChoice && <span style={{ color: 'var(--accent-gold)' }}> (choose one)</span>}
+                      </label>
+                      {isChoice ? (
+                        <select
+                          className="input-control"
+                          value={chosen}
+                          onChange={(e) => setSelectedForceDispositionIds(prev => ({ ...prev, [d.id]: e.target.value }))}
+                        >
+                          <option value="">-- Select disposition --</option>
+                          {options.map(o => (
+                            <option key={o.id} value={o.id}>{o.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{options[0].name}</span>
+                      )}
+                    </div>
+                  );
+                })}
+
                 {/* Allegiance / sub-faction selectors — each group unlocks conditional
                     keyword grants and drives allegiance validation. Detachment-scoped
                     groups only appear once their detachment is selected. */}
@@ -3203,6 +3279,18 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 ))}
               </div>
 
+              {/* Legends toggle — off by default (not matched-play legal) */}
+              {[...(factionData?.units || []), ...(factionData?.alliedUnits || [])].some(u => u.isLegends) && (
+                <label className="checkbox-row" style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  <input
+                    type="checkbox"
+                    checked={showLegends}
+                    onChange={(e) => setShowLegends(e.target.checked)}
+                  />
+                  <span>Include Legends</span>
+                </label>
+              )}
+
               {/* Scrollable List */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '55vh', overflowY: 'auto' }}>
                 {filteredCatalog.map(unit => {
@@ -3215,6 +3303,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem', textTransform: 'uppercase' }}>{unit.name}</div>
                         <span style={{ fontSize: '0.75rem', color: 'var(--accent-gold)' }}>{pts} pts</span>
                         {unit.isFactionPack && <span className="badge badge-faction-pack" style={{ fontSize: '0.55rem', padding: '0.05rem 0.2rem', marginLeft: '0.25rem' }}>FP</span>}
+                        {unit.isLegends && <span className="badge badge-legends" style={{ fontSize: '0.55rem', padding: '0.05rem 0.2rem', marginLeft: '0.25rem' }} title="Warhammer Legends — not legal in matched play">LEGENDS</span>}
                       </div>
                       <button
                         className="button"

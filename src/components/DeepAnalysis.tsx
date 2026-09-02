@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Target, BarChart2, Shield, Sparkles, AlertCircle, RefreshCw, Flame, UserCheck, Truck, Plus, Trash2 } from 'lucide-react';
-import { calculateExpectedDamage, TARGET_PRESETS } from '../utils/mathhammer';
+import { calculateExpectedDamage, TARGET_PRESETS, selectProfilesForTarget } from '../utils/mathhammer';
 import type { MathhammerInput, TargetProfile } from '../utils/mathhammer';
 import { loadAndMergeFaction, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
@@ -180,7 +180,10 @@ export const DeepAnalysis: React.FC = () => {
       firstModel.weapons?.forEach(wp => {
         if (wp.wargearType !== 'weapon') return;
 
-        wp.profiles.forEach(prof => {
+        // A weapon with a conditional "Hunter" profile has two mutually
+        // exclusive statlines; fire only the one that applies to this target
+        // rather than summing both.
+        selectProfilesForTarget(wp.profiles, targetPreset.keywords).forEach(prof => {
           let bsValue = 4;
           const bsStr = prof.type === 'ranged' ? prof.ballisticSkill : prof.weaponSkill;
           if (bsStr && bsStr.includes('+')) {
@@ -245,14 +248,14 @@ export const DeepAnalysis: React.FC = () => {
 
   // Find all Transports in the current faction
   const transports = factionData?.units.filter((unit: MergedUnit) => {
-    if (unit.isCombatPatrol) return false;
+    if (unit.isCombatPatrol || unit.isLegends) return false;
     const keywords = unit.appDatasheet?.models?.[0]?.keywords || [];
     return keywords.some(k => k.toLowerCase() === 'transport');
   }) || [];
 
   // Find all units that can embark (basically all Infantry that are not monsters/vehicles)
   const infantryUnits = factionData?.units.filter((unit: MergedUnit) => {
-    if (unit.isCombatPatrol) return false;
+    if (unit.isCombatPatrol || unit.isLegends) return false;
     const keywords = unit.appDatasheet?.models?.[0]?.keywords || [];
     return keywords.some(k => k.toLowerCase() === 'infantry');
   }) || [];

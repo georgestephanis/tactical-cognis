@@ -58,6 +58,7 @@ export const initDatabaseFromBuffer = async (uint8: Uint8Array): Promise<SQL.Dat
     }
 
     db = new SQL_LIB.Database(uint8);
+    columnCache.clear();
     return db;
   } catch (err) {
     console.error('Database buffer initialization error:', err);
@@ -113,6 +114,7 @@ export const initDatabase = async (dbUrl: string = '/40k.sqlite'): Promise<SQL.D
     }
 
     db = new SQL_LIB.Database(uint8);
+    columnCache.clear();
     return db;
   } catch (err) {
     console.warn('Database auto-initialization skipped or failed:', err);
@@ -150,10 +152,73 @@ export const query = async (sql: string, params: (string | number | boolean | nu
 };
 
 /**
+ * Cache of `PRAGMA table_info` column-name lookups, keyed by table name.
+ * Cleared whenever a new database is opened.
+ */
+const columnCache = new Map<string, Set<string>>();
+
+/** SQLite identifiers we're willing to interpolate into a PRAGMA. */
+const SAFE_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Returns true if `table` has a column named `column` in the currently open DB.
+ *
+ * Companion-app schema versions vary, so any column added by a newer app release
+ * has to be probed before it can be selected — otherwise one missing column
+ * fails the entire datasheet load. Results are cached per table.
+ *
+ * `PRAGMA` does not accept bound parameters, so the table name is interpolated.
+ * It's rejected unless it's a plain identifier and then double-quoted, so a
+ * malformed call fails loudly here instead of producing a confusing SQL error
+ * somewhere downstream.
+ *
+ * SQLite identifiers are case-insensitive, so both names are compared
+ * case-insensitively — `hasColumn('datasheet', 'islegends')` must not disagree
+ * with `hasColumn('datasheet', 'isLegends')`.
+ */
+export async function hasColumn(table: string, column: string): Promise<boolean> {
+  if (!SAFE_IDENTIFIER_RE.test(table)) {
+    console.warn(`hasColumn: refusing to probe unsafe table identifier "${table}"`);
+    return false;
+  }
+
+  const cacheKey = table.toLowerCase();
+  let cols = columnCache.get(cacheKey);
+  if (!cols) {
+    try {
+      const info = await query(`PRAGMA table_info("${table}")`);
+      cols = new Set(info.map(c => String(c.name).toLowerCase()));
+    } catch (err) {
+      console.warn(`Could not read schema for table "${table}":`, err);
+      cols = new Set<string>();
+    }
+    columnCache.set(cacheKey, cols);
+  }
+  return cols.has(column.toLowerCase());
+}
+
+/**
  * Maps a name to a slug (lowercase, dash-separated).
  */
 export function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+/**
+ * Parses `wargear_item_profile.hunterProfileKeyword` into a keyword list.
+ *
+ * The DB stores it as emphasised, slash-separated prose — e.g. the only value
+ * present as of data version 946 is `**MONSTER/VEHICLE**`, meaning "applies
+ * against a target that is a MONSTER *or* a VEHICLE". Returns `[]` when the
+ * profile has no hunter condition (i.e. it is an ordinary profile).
+ */
+export function parseHunterKeywords(raw: unknown): string[] {
+  if (raw == null) return [];
+  return String(raw)
+    .replace(/\*/g, '')
+    .split('/')
+    .map(k => k.trim().toUpperCase())
+    .filter(Boolean);
 }
 
 /**
@@ -216,11 +281,18 @@ export const getUnitsByFaction = async (factionSlug: string): Promise<Record<str
 
   const idList = kwIds.map(id => `'${id}'`).join(',');
 
+  // `datasheet.isLegends` and `publication.isCombatPatrol` arrived with the
+  // 11th-edition data drop (Codex: Orks is the first book to ship Legends
+  // datasheets); fall back to 0 so older companion DBs still load.
+  const legendsCol = (await hasColumn('datasheet', 'isLegends')) ? 'd.isLegends' : '0 AS isLegends';
+  const cpCol = (await hasColumn('publication', 'isCombatPatrol')) ? 'p.isCombatPatrol' : '0 AS isCombatPatrol';
+
   // 1. Get datasheets that have ANY of the faction keywords in our list
   const datasheets = await query(`
     SELECT DISTINCT
       d.id, d.name, d.unitComposition as compositionRules, p.name as publication,
-      d.lore, d.maxModelCount, d.isFreeFromEntitlements
+      d.lore, d.maxModelCount, d.isFreeFromEntitlements,
+      ${legendsCol}, ${cpCol}
     FROM datasheet d
     JOIN datasheet_faction_keyword dfk ON d.id = dfk.datasheetId
     LEFT JOIN publication p ON d.publicationId = p.id
@@ -359,8 +431,15 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
   const wargearItemMap = new Map<string, Record<string, unknown>>();
   wargearItems.forEach(item => wargearItemMap.set(String(item.id), item));
 
+  // `hunterProfileKeyword` arrived with the 11th-edition data (Codex: Orks). It
+  // marks a conditional "Hunter" statline that only applies against targets with
+  // the listed keywords — probe for it so older DBs still load.
+  const hunterCol = (await hasColumn('wargear_item_profile', 'hunterProfileKeyword'))
+    ? 'hunterProfileKeyword'
+    : `NULL AS hunterProfileKeyword`;
   const allProfiles = await query(`
-    SELECT id, wargearItemId, name, type, range, attacks, ballisticSkill, weaponSkill, strength, armourPenetration, damage
+    SELECT id, wargearItemId, name, type, range, attacks, ballisticSkill, weaponSkill, strength, armourPenetration, damage,
+      ${hunterCol}
     FROM wargear_item_profile
     ORDER BY displayOrder
   `);
@@ -390,7 +469,7 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
       if (!item) return;
       const profiles = allProfiles.filter(p => p.wargearItemId === opt.wargearItemId).map(p => {
         const rules = profileAbilities.filter(pa => pa.wargearItemProfileId === p.id).map(pa => String(pa.name));
-        return { name: p.name || item.name, type: p.type, range: p.range, attacks: p.attacks, ballisticSkill: p.ballisticSkill, weaponSkill: p.weaponSkill, strength: p.strength, armourPenetration: p.armourPenetration, damage: p.damage, rules: rules };
+        return { name: p.name || item.name, type: p.type, range: p.range, attacks: p.attacks, ballisticSkill: p.ballisticSkill, weaponSkill: p.weaponSkill, strength: p.strength, armourPenetration: p.armourPenetration, damage: p.damage, rules: rules, hunterKeywords: parseHunterKeywords(p.hunterProfileKeyword) };
       });
       weapons.push({ name: item.name, wargearType: item.wargearType, count: Number(opt.count), profiles: profiles });
     });
@@ -562,6 +641,8 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
     lore: ds.lore,
     maxModelCount: ds.maxModelCount,
     isFreeFromEntitlements: !!ds.isFreeFromEntitlements,
+    isLegends: !!ds.isLegends,
+    isCombatPatrol: !!ds.isCombatPatrol,
     factionKeywords: datasheetFactionKeywords.filter(dfk => dfk.datasheetId === ds.id).map(dfk => String(dfk.name)),
     models: miniatures.filter(m => m.datasheetId === ds.id).map(m => miniMap.get(String(m.id))),
     compositions: compMap.get(String(ds.id)) || [],
@@ -611,8 +692,12 @@ export const getAlliedUnitsForFaction = async (
 
   const dsIdList = Array.from(dsDetMap.keys()).map(id => `'${id}'`).join(',');
 
+  const legendsCol = (await hasColumn('datasheet', 'isLegends')) ? 'd.isLegends' : '0 AS isLegends';
+  const cpCol = (await hasColumn('publication', 'isCombatPatrol')) ? 'p.isCombatPatrol' : '0 AS isCombatPatrol';
+
   const datasheets = await query(`
-    SELECT d.id, d.name, d.unitComposition as compositionRules, p.name as publication, d.lore, d.maxModelCount, d.isFreeFromEntitlements
+    SELECT d.id, d.name, d.unitComposition as compositionRules, p.name as publication, d.lore, d.maxModelCount, d.isFreeFromEntitlements,
+      ${legendsCol}, ${cpCol}
     FROM datasheet d
     LEFT JOIN publication p ON d.publicationId = p.id
     WHERE d.id IN (${dsIdList})
@@ -781,6 +866,23 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
     WHERE duk.detachmentId IN (${detIds})
   `);
 
+  // Fetch force dispositions. A detachment's disposition, crossed with the
+  // opponent's, selects the primary mission (`force_disposition_mission`).
+  // Almost every detachment has exactly one, but a detachment may offer several
+  // for the player to choose between — guarded, since older DBs lack the table.
+  let forceDispositions: Record<string, unknown>[] = [];
+  try {
+    forceDispositions = await query(`
+      SELECT dfd.detachmentId, fd.id, fd.name
+      FROM detachment_force_disposition dfd
+      JOIN force_disposition fd ON fd.id = dfd.forceDispositionId
+      WHERE dfd.detachmentId IN (${detIds})
+      ORDER BY fd.name
+    `);
+  } catch (err) {
+    console.warn('Skipping force dispositions (table missing):', err);
+  }
+
   return detachments.map(det => {
     const restrictions = uniqueKeywords.filter(uk => uk.detachmentId === det.id).map(uk => `UNIQUE: ${String(uk.name).toUpperCase()}`);
 
@@ -814,6 +916,9 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
       }),
       stratagems: stratagems.filter(s => s.detachmentId === det.id),
       restrictions: restrictions,
+      forceDispositions: forceDispositions
+        .filter(fd => fd.detachmentId === det.id)
+        .map(fd => ({ id: String(fd.id), name: String(fd.name) })),
     };
   });
 };

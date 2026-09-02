@@ -26,7 +26,9 @@ Users choose between three primary analysis workspaces:
 - Uses `calculateExpectedDamage(mathInput, target)` (defined in [src/utils/mathhammer.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/utils/mathhammer.ts)).
 - Parses variable dice expressions (e.g. `'D6'`, `'2D6+3'`, `'D3'`) using mathematical averages (e.g., D6 = 3.5, D3 = 2, 2D6+3 = 10) to support fractional expected damage calculations.
 - Evaluates keywords: **Blast** increases attacks based on target unit size; **Lethal Hits** skip wound rolls; **Devastating Wounds** skip saving throws; **Sustained Hits** award bonus hits on roll checks of 6; **Twin-Linked** permits full wound re-rolls.
+- Selects conditional weapon profiles via `selectProfilesForTarget(weapon.profiles, target.keywords)`. A weapon with a `Hunter` profile has two mutually exclusive statlines, so only the one applicable to the active target preset is fired — summing both would roughly double that weapon's rated output. Weapons without a Hunter profile keep every profile, as before.
 - Evaluates transport occupancy: If embarked models carry `MEGA ARMOUR` or `TERMINATOR` keywords, they count as 2 models toward the vehicle's capacity.
+- Excludes Combat Patrol and Warhammer Legends units from the transport/embark pickers.
 
 ---
 

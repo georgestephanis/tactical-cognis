@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Shield, Target, BookOpen } from 'lucide-react';
 import type { MergedUnit, Weapon, WeaponProfile } from '../types/data';
-import { calculateExpectedDamage, TARGET_PRESETS } from '../utils/mathhammer';
+import { calculateExpectedDamage, TARGET_PRESETS, profileAppliesToTarget } from '../utils/mathhammer';
 import type { MathhammerInput } from '../utils/mathhammer';
 import { getDatasheetCosts } from '../utils/dataMapper';
 import RulesText from './RulesText';
@@ -138,7 +138,10 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
     return {
       target,
       res,
-      yieldPer100Pts
+      yieldPer100Pts,
+      // A "Hunter" profile is only usable against specific target keywords —
+      // showing its damage against everything else would be misleading.
+      applies: profileAppliesToTarget(selectedProfile, target.keywords)
     };
   }) : [];
 
@@ -620,6 +623,15 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                             <tr key={`${wp.name}-${pidx}`}>
                               <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                 {wp.profiles.length > 1 ? `${wp.name} (${prof.name})` : wp.name}
+                                {prof.hunterKeywords && prof.hunterKeywords.length > 0 && (
+                                  <span
+                                    className="badge badge-legends"
+                                    style={{ fontSize: '0.6rem', padding: '0.05rem 0.25rem', marginLeft: '0.35rem', verticalAlign: 'middle' }}
+                                    title={`Only usable against targets with the ${prof.hunterKeywords.join(' or ')} keyword`}
+                                  >
+                                    vs {prof.hunterKeywords.join('/')}
+                                  </span>
+                                )}
                                 <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 500, marginTop: '0.15rem' }}>
                                   {prof.type}
                                 </span>
@@ -808,21 +820,29 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                             </thead>
                             <tbody>
                               {mathResults.map((item, idx) => (
-                                <tr key={idx}>
+                                <tr key={idx} style={item.applies ? undefined : { opacity: 0.45 }}>
                                   <td>
                                     <strong style={{ color: 'var(--text-primary)' }}>{item.target.name}</strong>
                                     <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                                       T{item.target.t} Sv{item.target.sv}+ W{item.target.w} {item.target.inv && `Inv${item.target.inv}++`}
                                     </span>
                                   </td>
-                                  <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)' }}>{item.res.expectedHits.toFixed(2)}</td>
-                                  <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)' }}>{item.res.expectedWounds.toFixed(2)}</td>
-                                  <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', color: 'var(--accent-red)', fontWeight: 600 }}>
-                                    {item.res.casualties.toFixed(2)}
-                                  </td>
-                                  <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--accent-gold)', fontWeight: 700 }}>
-                                    {unitPoints > 0 ? item.yieldPer100Pts.toFixed(3) : "—"}
-                                  </td>
+                                  {item.applies ? (
+                                    <>
+                                      <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)' }}>{item.res.expectedHits.toFixed(2)}</td>
+                                      <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)' }}>{item.res.expectedWounds.toFixed(2)}</td>
+                                      <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', color: 'var(--accent-red)', fontWeight: 600 }}>
+                                        {item.res.casualties.toFixed(2)}
+                                      </td>
+                                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--accent-gold)', fontWeight: 700 }}>
+                                        {unitPoints > 0 ? item.yieldPer100Pts.toFixed(3) : "—"}
+                                      </td>
+                                    </>
+                                  ) : (
+                                    <td colSpan={4} style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                      Profile not usable — requires {(selectedProfile?.hunterKeywords || []).join(' or ')}
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>

@@ -27,6 +27,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('all');
   const [showCombatPatrol, setShowCombatPatrol] = useState(false);
+  const [showLegends, setShowLegends] = useState(false);
 
   // Print Selection States
   const [selectedUnits, setSelectedUnits] = useState<MergedUnit[]>([]);
@@ -84,6 +85,10 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
     // Filter out combat patrol units unless explicitly enabled
     if (!showCombatPatrol && unit.isCombatPatrol) return false;
 
+    // Legends datasheets aren't legal in matched play, so they're hidden by
+    // default — unless the toggle is on, or the Legends role tab is selected.
+    if (!showLegends && selectedRole !== 'legends' && unit.isLegends) return false;
+
     const matchesSearch = unit.name.toLowerCase().includes(searchQuery.toLowerCase());
 
     if (!matchesSearch) return false;
@@ -99,7 +104,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
     if (selectedRole === 'monster') return keywords.some(k => k.toLowerCase() === 'monster');
     if (selectedRole === 'infantry') return keywords.some(k => k.toLowerCase() === 'infantry');
     if (selectedRole === 'transport') return keywords.some(k => k.toLowerCase() === 'transport');
-    if (selectedRole === 'legends') return unit.appDatasheet?.isLegends;
+    if (selectedRole === 'legends') return unit.isLegends;
 
     return true;
   });
@@ -249,6 +254,16 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                 />
                 <span>Include Combat Patrol</span>
               </label>
+
+              {/* Legends Toggle */}
+              <label className="checkbox-row" style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                <input
+                  type="checkbox"
+                  checked={showLegends}
+                  onChange={(e) => setShowLegends(e.target.checked)}
+                />
+                <span>Include Legends</span>
+              </label>
             </div>
 
             {/* Role filter buttons */}
@@ -293,7 +308,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
             <div className="faction-grid">
               {filteredUnits.map(unit => {
                 const datasheet = unit.appDatasheet;
-                const isLegends = datasheet?.isLegends;
+                const isLegends = unit.isLegends;
 
                 // Get keywords from first model
                 const firstModel = datasheet?.models?.[0];
@@ -455,6 +470,20 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                       <div style={{ display: 'flex', gap: '0.5rem' }}>
                         {det.isFactionPack && <span className="badge badge-faction-pack">Faction Pack</span>}
                         {det.isCombatPatrol && <span className="badge badge-legends">Combat Patrol</span>}
+                        {(det.forceDispositions || []).length > 0 && (
+                          <span
+                            className="badge badge-legends"
+                            title={
+                              det.forceDispositions.length > 1
+                                ? `Choose one force disposition: ${det.forceDispositions.map(f => f.name).join(' or ')}. Crossed with the opponent's disposition, this selects the primary mission.`
+                                : `Force disposition — crossed with the opponent's, this selects the primary mission.`
+                            }
+                          >
+                            {det.forceDispositions.length > 1
+                              ? `Disposition: ${det.forceDispositions.map(f => f.name).join(' / ')} (choose one)`
+                              : `Disposition: ${det.forceDispositions[0].name}`}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>

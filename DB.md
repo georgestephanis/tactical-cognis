@@ -31,7 +31,7 @@ prompt. The file lives at `public/40k.sqlite` locally and is gitignored.
   sidecar files.
 
 ```bash
-sqlite3 public/40k.sqlite 'SELECT dataVersion FROM metadata;'   # e.g. 886
+sqlite3 public/40k.sqlite 'SELECT dataVersion FROM metadata;'   # e.g. 946
 sqlite3 public/40k.sqlite '.tables'                             # list all tables
 sqlite3 public/40k.sqlite '.schema datasheet'                   # one table's DDL
 ```
@@ -70,7 +70,7 @@ the shape doesn't.
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `datasheet` | 1,142 | `id`, `name`, `lore`, `baseSize`, `maxModelCount`, `unitComposition` (prose), `publicationId`, `isFreeFromEntitlements` |
+| `datasheet` | 1,155 | `id`, `name`, `lore`, `baseSize`, `maxModelCount`, `unitComposition` (prose), `publicationId`, `isFreeFromEntitlements`, **`isLegends`** |
 | `miniature` | 1,569 | statline columns, `datasheetId`, `statlineHidden`, `isSupremeCommander`, `cannotBeWarlord`, `miniatureSlots` |
 | `unit_composition` | 1,516 | `datasheetId`, **`points` (INTEGER)**, `isDefault` — one row per legal size/price tier |
 | `unit_composition_miniature` | — | which miniatures (`min`/`max` of each) fill each tier |
@@ -85,7 +85,7 @@ the shape doesn't.
 | Table | ~Rows | Key columns / links |
 |---|---|---|
 | `wargear_item` | 3,516 | `name`, `wargearType`, `ruleText` — names repeat; items are per-datasheet instances |
-| `wargear_item_profile` | 3,712 | `wargearItemId`, `name`, `type` (ranged/melee), `range`, `attacks`, `ballisticSkill`/`weaponSkill`, `strength`, `armourPenetration`, `damage` |
+| `wargear_item_profile` | 3,246 | `wargearItemId`, `name`, `type` (ranged/melee), `range`, `attacks`, `ballisticSkill`/`weaponSkill`, `strength`, `armourPenetration`, `damage`, **`hunterProfileKeyword`** (conditional profile — see [Hunter profiles](#conditional-hunter-weapon-profiles)) |
 | `wargear_ability` + `wargear_item_profile_wargear_ability` | — | weapon special rules and their links to profiles |
 | `base_miniature_loadout` / `base_miniature_loadout_wargear_option` | — | baseline gear each miniature starts with |
 | `loadout_choice_set` → `loadout_choice` → `loadout_choice_wargear_item` | — | default loadout + swap options (`limit`, `alternate`) |
@@ -141,8 +141,10 @@ the shape doesn't.
   construction limits for that size: `detachmentPointsLimit`, `enhancementLimit`,
   `duplicateUnitLimit`. The authoritative source for "how many detachment points /
   enhancements / duplicate datasheets at this game size".
-- **Publications & FAQ:** `publication` (~69) — most entities carry `publicationId`;
-  `faq` / `faq_config` hold errata with text inline.
+- **Publications & FAQ:** `publication` (~70) — most entities carry `publicationId`;
+  `faq` / `faq_config` hold errata with text inline. `isCombatPatrol` (24 rows true)
+  marks the `Combat Patrol: X` boxed-set books; `combatPatrolName` and `errataDate`
+  are optional labels.
 
 ### App-runtime tables (not dataset content)
 
@@ -194,7 +196,7 @@ All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
 |---|---|
 | Faction list (`getFactionList`) | `faction_keyword`, `datasheet_faction_keyword`, `detachment_faction_keyword` |
 | Units per faction (`getUnitsByFaction`) | `datasheet`, `publication`, `datasheet_faction_keyword`, `miniature`, `miniature_keyword`, `keyword`, `unit_composition(_miniature)`, `datasheet_points_step`, `datasheet_datasheet_ability`, `datasheet_ability`, `datasheet_bodyguard_group(_datasheet/_keyword)`, `wargear_item`, `wargear_item_profile`, `wargear_item_profile_wargear_ability`, `wargear_ability`, `base_miniature_loadout(_wargear_option)`, `wargear_option`, `loadout_choice_set`, `loadout_choice`, `loadout_choice_wargear_item`, `limited_wargear_choice_set`, `limited_wargear_choice`, `limited_wargear_choice_wargear_item`, `wargear_limit` |
-| Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement` (+ `enhancement_required_keyword_group`, `enhancement_required_keyword`, `enhancement_excluded_keyword`, `enhancement_required_bodyguard_group`, `enhancement_required_bodyguard_datasheet`, `enhancement_required_wargear`), `stratagem`, `detachment_unique_keyword` |
+| Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement` (+ `enhancement_required_keyword_group`, `enhancement_required_keyword`, `enhancement_excluded_keyword`, `enhancement_required_bodyguard_group`, `enhancement_required_bodyguard_datasheet`, `enhancement_required_wargear`), `stratagem`, `detachment_unique_keyword`, `detachment_force_disposition`, `force_disposition` |
 | Army Builder game-size limits (`getBattleSizes`) | `battle_size` |
 | Allied units + caps (`getAlliedUnitsForFaction`, `getAlliedLimitsForFaction`) | `faction_keyword_allied_faction`, `allied_faction_datasheet`, `allied_faction_required_detachment`, `allied_faction_keyword`, `allied_faction_points_limit`, `battle_size`, `keyword`, `datasheet`, `publication` |
 | Conditional keyword grants (`getConditionalKeywordGrants`) | `conditional_keyword`, `datasheet`, `keyword`, `detachment`, `miniature`, `allegiance_ability`, `faction_keyword` — including allegiance- and roster-keyword-gated rows, resolved in the Army Builder once an allegiance is declared |
@@ -218,7 +220,9 @@ carry both a parent and child faction keyword.
 
 Regenerate this list anytime with `comm -23 <(sqlite3 public/40k.sqlite '.tables' | tr -s ' ' '\n' | sort) <(grep -oE '\b[a-z_][a-z0-9_]*\b' src/utils/db.ts | sort -u)` —
 it diffs every table name in the live schema against every identifier `db.ts`
-actually references. As of this writing, 64 of the DB's 145 tables are untouched.
+actually references. As of this writing, 61 of the DB's 145 tables are untouched
+(`detachment_force_disposition` and `force_disposition` are now queried — see
+[Force dispositions](#force-dispositions-detachment_force_disposition)).
 Most are **not** scorekeeping/match-tracking — they're content-integration gaps in
 areas the app already partially covers:
 
@@ -227,7 +231,7 @@ areas the app already partially covers:
   app): `mission_pack`, `mission_preset`, `mission_layout(_linked_deployment)`,
   `mission_deployment`, `mission_twist`, `primary_mission(_action/_objective*)`,
   `secondary_mission(_action/_objective*/_restricted_secondary_mission)`,
-  `secondary_objective`, `objective`, `force_disposition(_mission*)`, `battle`,
+  `secondary_objective`, `objective`, `force_disposition_mission(_recommended_preset)`, `battle`,
   `battle_player(_detachment/_secondary_mission/_turn*)`.
 - **Enhancement eligibility edge cases** (which units/detachments can take which
   enhancement, beyond what `getDetachmentsByFaction` already resolves):
@@ -242,7 +246,7 @@ areas the app already partially covers:
   `allied_faction_keyword_slotless_keyword_group(_donor_keyword/_receiver_keyword)`,
   `allied_faction_parent_faction_keyword`.
 - **Detachment/wargear flavor & structure**: `detachment_detail(_bullet_point)`
-  (the companion app's "why take this detachment" bullet list), `detachment_force_disposition`,
+  (the companion app's "why take this detachment" bullet list),
   `detachment_linked_datasheet`, `detachment_required_datasheet`, `wargear_option_group`,
   `all_model_wargear_choice(_set/_wargear_item)`, `datasheet_sub_ability`.
 - **Narrow legality edge cases**: `keyword_ally_restricting_keyword`,
@@ -337,6 +341,152 @@ JOIN datasheet_bodyguard_group_datasheet bgd ON bgd.datasheetBodyguardGroupId = 
 JOIN datasheet bg ON bg.id = bgd.datasheetId
 ORDER BY leader, bodyguard;
 ```
+
+## 11th edition / Legends (data version ~946)
+
+`Codex: Orks` is the first 11th-edition book in the dataset, and it introduced
+schema and content the earlier 10th-edition data never exercised.
+
+**`datasheet.isLegends`** (BOOLEAN, default 0) — new column. Marks a
+[Warhammer Legends](https://www.warhammer-community.com/warhammer-legends/)
+datasheet: still playable in open and narrative games, but **not legal in matched
+play**. As of v946 exactly **12 rows** are flagged, all belonging to a single
+`Legends: <faction>` publication. Every other publication is `isLegends = 0`.
+(Run the query below against your own database to see which datasheets those are.)
+
+These datasheets carry the normal `ORKS` faction keyword and real costed
+`unit_composition` rows, so **they are indistinguishable from codex units unless
+you read the flag** — they will otherwise pad the faction list, the Army Builder
+catalogue and the points-efficiency matrix. Tactical Cognis hides them by default
+behind an "Include Legends" toggle and raises a roster validation error if one is
+present (see `src/utils/dataMapper.ts` and `src/components/ArmyBuilder.tsx`).
+
+```sql
+SELECT p.name, count(*) FROM datasheet d
+JOIN publication p ON p.id = d.publicationId
+WHERE d.isLegends = 1 GROUP BY p.name;
+```
+
+The `Legends: <faction>` publication also carries two `rule_section` rows explaining
+the Legends system and proxying rules; they are picked up by the Core Rules view like
+any other rule section.
+
+### Conditional "Hunter" weapon profiles
+
+**`wargear_item_profile.hunterProfileKeyword`** (TEXT, nullable) — new column, and
+a genuinely new *mechanic* rather than just new content.
+
+A weapon with this set has two mutually exclusive statlines: a `Hunter` profile
+that applies **only** against targets carrying the listed keywords, and a
+`Standard` profile used against everything else. This is unlike an ordinary
+multi-profile weapon (a combi-weapon, say), where every profile is simultaneously
+available — so **summing all of a weapon's profiles is wrong here** and roughly
+doubles its output.
+
+As of v946 there are **6 such profiles across 5 weapons**, confined to one codex,
+and every one stores the same value: `**MONSTER/VEHICLE**`. In each case the weapon
+carries exactly two profiles — one named `Hunter` (gated) and one named `Standard`
+(ungated) — with the Hunter line the stronger of the two against qualifying
+targets. Use the query below to inspect the actual statlines in your own database.
+
+**Value format:** emphasised, slash-separated prose — `**` is markdown emphasis to
+be stripped, and `/` means **OR**. `src/utils/db.ts` exports `parseHunterKeywords()`
+which normalises `**MONSTER/VEHICLE**` to `['MONSTER', 'VEHICLE']` onto
+`WeaponProfile.hunterKeywords`; an ordinary profile gets `[]`.
+
+There is **no rules text** anywhere in the DB explaining the mechanic — it is
+expressed purely structurally by this column, so a consumer that ignores the
+column has no other signal that the profile is conditional.
+
+Selection logic lives in `src/utils/mathhammer.ts` (pure, unit-tested):
+
+```ts
+profileAppliesToTarget(profile, targetKeywords)   // may this profile be used?
+selectProfilesForTarget(weapon.profiles, target.keywords)  // which to actually fire
+```
+
+`selectProfilesForTarget` returns the Hunter profile alone against a matching
+target, the unconditional profile(s) otherwise, and every profile unchanged for
+weapons that have no Hunter profile.
+
+```sql
+SELECT wi.name, wip.name, wip.strength, wip.armourPenetration, wip.damage, wip.hunterProfileKeyword
+FROM wargear_item_profile wip JOIN wargear_item wi ON wi.id = wip.wargearItemId
+WHERE wip.hunterProfileKeyword IS NOT NULL AND wip.hunterProfileKeyword <> '';
+```
+
+### Force dispositions (`detachment_force_disposition`)
+
+A **force disposition** is the posture an army deploys under. Crossed with the
+*opponent's* disposition it selects the primary mission you play, via
+`force_disposition_mission` (`friendlyForceDispositionId` × `oppositionForceDispositionId`
+→ `primaryMissionId`). There are 5 dispositions, so that table holds all 5×5 = 25
+pairings, and `force_disposition_mission_recommended_preset` adds 75 recommended
+mission presets on top.
+
+| Table | Rows | Purpose |
+| --- | --- | --- |
+| `force_disposition` | 5 | The five deployment postures (names live in your own database) |
+| `detachment_force_disposition` | 295 | Which disposition(s) a detachment may deploy under |
+| `force_disposition_mission` | 25 | (friendly × opposition) → primary mission |
+| `force_disposition_mission_recommended_preset` | 75 | Recommended mission presets per pairing |
+
+The companion app records the player's pick on `roster.forceDispositionId` and
+`battle_player.forceDispositionId`.
+
+**The case worth handling:** a detachment usually maps to exactly one disposition,
+but *may offer several for the player to choose between*. As of v946, of 294
+detachments **293 offer exactly one and none offer zero** — a single detachment
+(introduced in the 11th-edition codex) offers a choice between two. That choice is a
+real strategic decision: it swaps the entire row of primary missions the army can
+end up playing, so it cannot be modelled as a single value.
+
+```sql
+-- detachments that offer a CHOICE of disposition
+SELECT det.name, group_concat(fd.name, ' / ')
+FROM detachment_force_disposition dfd
+JOIN detachment det ON det.id = dfd.detachmentId
+JOIN force_disposition fd ON fd.id = dfd.forceDispositionId
+GROUP BY dfd.detachmentId HAVING count(*) > 1;
+```
+
+Tactical Cognis surfaces the disposition on each detachment (`MergedDetachment.forceDispositions`);
+the Army Builder shows a single disposition read-only, renders a selector when a
+detachment offers more than one, persists the pick per detachment id on the saved
+roster (`ArmyList.selectedForceDispositionIds`), and raises a validation error while
+the choice is outstanding. The query is `try/catch`-guarded, so a database without
+the table degrades to no dispositions rather than failing the detachment load.
+
+**Other 11th-edition additions worth knowing:**
+
+- `behaviour_type` gained **Surge Move** and **Ingress Move**; the new
+  `army_rule_behaviour_type` join table links army rules to movement/shooting/
+  fighting behaviours (2 rows, both under "Special Move Types").
+- Core Rules gained *"21. Flying and Surging"* and a *"Universal Rules Updates"*
+  section.
+- The 11th-edition codex adds a new faction-wide `army_rule` row and 16 detachments,
+  one of which is its Combat Patrol detachment.
+
+**Data-shape caveat:** `Codex: Orks` datasheets almost entirely lack `lore` — 1 of
+67 Ork rows is populated, versus ~90% (974/1,088) everywhere else. 11 of the 54
+`Codex: Orks` datasheets also have no `baseSize`. Render these as optional.
+
+### Handling schema drift
+
+Companion-app releases add columns, and users upload databases of varying age. Any
+column added by a newer release must be probed before it is selected, or one
+missing column fails the whole load. `src/utils/db.ts` exports a cached
+`hasColumn(table, column)` helper for this:
+
+```ts
+const legendsCol = (await hasColumn('datasheet', 'isLegends'))
+  ? 'd.isLegends'
+  : '0 AS isLegends';
+```
+
+Combat Patrol detection follows the same shape, falling back to the
+`Combat Patrol: X` publication-name heuristic when `publication.isCombatPatrol`
+is absent.
 
 ## Comparing data versions
 
