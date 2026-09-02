@@ -118,6 +118,41 @@ Located in `parseDiceAverage` and `getDiceDistribution`:
 
 ---
 
+## 🎯 Profile Selection (Conditional "Hunter" Profiles)
+
+Before any of the math above runs, a caller has to decide **which** of a weapon's profiles is actually being fired. For most weapons the answer is "all of them" — a combi-weapon's profiles are simultaneously available, so their damage sums.
+
+A **Hunter** profile breaks that assumption. It is a statline usable *only* against targets carrying particular keywords, paired with a `Standard` profile used against everything else — the two are mutually exclusive. Summing both roughly **doubles** the weapon's output.
+
+The engine therefore exposes two pure helpers (no DB or React dependency, consistent with the rest of this module):
+
+```typescript
+export interface ConditionalProfile {
+  name?: string;
+  hunterKeywords?: string[];  // empty/absent for ordinary profiles
+}
+
+profileAppliesToTarget(profile: ConditionalProfile, targetKeywords: string[]): boolean
+selectProfilesForTarget<T extends ConditionalProfile>(profiles: T[], targetKeywords: string[]): T[]
+```
+
+**Matching rules.** Keywords are OR'd and compared case-insensitively, mirroring the `MONSTER/VEHICLE` form the database stores. A profile with no `hunterKeywords` always applies.
+
+**Selection rules** for `selectProfilesForTarget`:
+
+| Weapon shape | Target matches? | Returned |
+| --- | --- | --- |
+| No Hunter profile | — | every profile (unchanged) |
+| Hunter + Standard | yes | the Hunter profile only |
+| Hunter + Standard | no | the unconditional profile(s) |
+| Hunter only | no | `[]` — nothing, rather than an illegal statline |
+
+`ConditionalProfile` is structural, so a full `WeaponProfile` satisfies it without this module importing the data-layer types. The keyword list itself is parsed upstream by `parseHunterKeywords()` in `db.ts`.
+
+**Consumers.** `DeepAnalysis` routes its per-weapon damage aggregation through `selectProfilesForTarget()` against the active target preset. `UnitDetails` uses `profileAppliesToTarget()` to grey out preset rows a manually-selected Hunter profile could not legally be used against, instead of reporting damage figures for an illegal attack.
+
+---
+
 ## ✅ Unit Test Coverage
 
 The engine has a zero-dependency test suite at [tests/mathhammer.test.ts](../tests/mathhammer.test.ts) (plain `assert` calls, run via `tsx`):
@@ -126,4 +161,6 @@ The engine has a zero-dependency test suite at [tests/mathhammer.test.ts](../tes
 npm test
 ```
 
-It covers dice-expression parsing and probability distributions, Feel No Pain (binomial), hit/wound modifiers (including Transhuman-style caps), Benefit of Cover, AP and saving-throw logic, and Devastating Wounds. Prefer extending this file (or cloning its pattern) when adding math features.
+It covers dice-expression parsing and probability distributions, Feel No Pain (binomial), hit/wound modifiers (including Transhuman-style caps), Benefit of Cover, AP and saving-throw logic, Devastating Wounds, and conditional (Hunter) profile selection. Prefer extending this file (or cloning its pattern) when adding math features.
+
+Note that the Hunter-profile tests use obviously-fake placeholder keywords (`BIGTHING`/`SMALLTHING`) rather than real datasheet values, per the repo's no-GW-IP rule.

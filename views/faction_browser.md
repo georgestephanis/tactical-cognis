@@ -18,8 +18,8 @@ On mount or whenever `factionSlug` shifts, `loadAndMergeFaction(factionSlug)` ru
 
 ### 2. Multi-Tab Navigation
 Users toggle between four workspace panels:
-- **Units Registry (`units`):** Lists all profiles. Supports keyword filtering (Characters, Infantry, Vehicles, Monsters, etc.) and search filtering.
-- **Detachments (`detachments`):** Lists army detachments. Uses an accordion toggle state `expandedDetachment` to show/hide rules, custom stratagem profiles, and enhancement point costs.
+- **Units Registry (`units`):** Lists all profiles. Supports keyword filtering (Characters, Infantry, Vehicles, Monsters, Legends, etc.) and search filtering. Combat Patrol and Warhammer Legends datasheets are hidden by default behind *Include Combat Patrol* / *Include Legends* toggles; Legends units are badged where shown, and selecting the **Legends** role tab reveals them regardless of the toggle.
+- **Detachments (`detachments`):** Lists army detachments. Uses an accordion toggle state `expandedDetachment` to show/hide rules, custom stratagem profiles, and enhancement point costs. Each detachment is badged with its force disposition, and a detachment offering a choice of dispositions is badged as such.
 - **Faction Rules (`rules`):** Collects and displays army-wide rule modifications by filtering abilities marked with the `'faction'` keyword type across all loaded datasheets.
 - **Yield Analysis (`yield`):** A custom points-efficiency matrix showing mathematical ratios: Wounds per Point (x100) and OC per Point (x100) calculated by dividing total unit counts by average composition prices.
 
@@ -56,6 +56,7 @@ Users can check cards to select units and open a **Print Preview Modal**:
 - `activeTab` (string): Current tab selected (`'units' | 'detachments' | 'rules' | 'yield'`).
 - `selectedUnits` (`MergedUnit[]`): Accumulates checked units for custom print sheets.
 - `expandedDetachment` (string | null): Active detachment ID shown in the accordion.
+- `showCombatPatrol` / `showLegends` (boolean): Opt-in toggles for the two hidden-by-default datasheet classes.
 
 ---
 

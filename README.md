@@ -1,6 +1,6 @@
 # ⚙️ Tactical Cognis
 
-A high-fidelity analytical web app for Warhammer 40k: Mathhammer simulator, points-efficiency matrix, army builder with live roster-legality validation (points/battle-size, Rule of 3, allied caps, excluded units, 0-1 keyword caps, mandatory Warlords, and sub-faction/allegiance choices), and detachment/stratagem browser. Everything renders from a SQLite database queried in-browser via [`sql.js`](https://sql.js.org/) — **no game data is bundled in this repo.**
+A high-fidelity analytical web app for Warhammer 40k: Mathhammer simulator, points-efficiency matrix, army builder with live roster-legality validation (points/battle-size, Rule of 3, allied caps, excluded units, 0-1 keyword caps, mandatory Warlords, Warhammer Legends flagging, and sub-faction/allegiance choices), and detachment/stratagem browser. Everything renders from a SQLite database queried in-browser via [`sql.js`](https://sql.js.org/) — **no game data is bundled in this repo.**
 
 This repo contains only the app and its build tooling. It does not include any datamining/scraping pipeline or Games Workshop content — you supply your own extracted database locally (see below), which stays untracked by git.
 
@@ -30,7 +30,7 @@ npm run build                 # production web build → dist/ (may include your
 npm run build:distributable   # IP-free static site → dist-distributable/ — host this one
 ```
 
-`build:distributable` ([scripts/build_distributable.cjs](./scripts/build_distributable.cjs)) temporarily hides any local `public/40k.sqlite`, compiles, and recursively strips `.sqlite`/`.bak` files from the output — so `dist-distributable/` ships with zero game data, just HTML/JS/CSS/WASM. Visitors with no database land on the in-browser upload prompt and supply their own. This is the folder to host publicly.
+`build:distributable` ([scripts/build_distributable.cjs](./scripts/build_distributable.cjs)) temporarily stashes **every** database file in `public/` — `.sqlite`/`.sqlite3`/`.db` plus any `-wal`/`-shm`/`-journal` sidecars (the companion app's databases are in WAL mode, so sidecars reappear whenever anything opens them) — compiles, recursively strips the same set from the output, then **re-scans and fails the build** if anything remains. So `dist-distributable/` ships with zero game data, just HTML/JS/CSS/WASM. Visitors with no database land on the in-browser upload prompt and supply their own. This is the folder to host publicly.
 
 ### Serving the production build
 
@@ -52,3 +52,13 @@ For details on the project structure, views, and core engines, see:
 - **[Database Schema Reference](./DB.md):** Comprehensive schema map of the Warhammer companion app SQLite db, including the coverage table of which tables the app queries.
 - **[Integrations Roadmap & Log](./TODO.md):** What DB-backed features are built and what's still on the roadmap.
 - **[Manual SQLite Setup](./manual-db-sqlite.md):** Detailed guide to extracting the database from your device.
+
+### 11th edition support
+
+The dataset's first 11th-edition book (`Codex: Orks`) introduced two mechanics the app now handles explicitly — both documented in [DB.md](./DB.md):
+
+- **Warhammer Legends datasheets** (`datasheet.isLegends`) — playable in open/narrative games but not matched play. Hidden by default behind *Include Legends* toggles in the Faction Browser and Army Builder, badged where shown, and raised as a roster validation error.
+- **Conditional "Hunter" weapon profiles** (`wargear_item_profile.hunterProfileKeyword`) — a statline usable only against particular target keywords, paired with a `Standard` line for everything else. Damage aggregation picks the applicable line rather than summing both.
+- **Force dispositions** (`detachment_force_disposition`) — a detachment's disposition, crossed with the opponent's, selects the primary mission. Shown per detachment, and where a detachment offers a *choice* of dispositions the Army Builder renders a selector, persists the pick, and validates that one has been made.
+
+Companion-app databases vary by release, so columns added by newer versions are probed with `hasColumn()` before use; an older database degrades gracefully rather than failing to load.

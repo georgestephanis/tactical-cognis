@@ -21,6 +21,16 @@ export interface WeaponProfile {
   armourPenetration: string;
   damage: string;
   rules?: string[];
+  /**
+   * `wargear_item_profile.hunterProfileKeyword`, parsed.
+   *
+   * A "Hunter" profile is a conditional statline that only applies when the
+   * target has one of these keywords (matched as OR); the weapon's other
+   * profile ("Standard") applies against everything else. Introduced with
+   * `Codex: Orks` in 11th edition. Empty/absent for ordinary profiles, where
+   * every profile of a weapon is simultaneously available.
+   */
+  hunterKeywords?: string[];
 }
 
 export interface Weapon {
@@ -135,7 +145,10 @@ export interface Datasheet {
   faction: string;
   factionKeywords: string[];
   publication: string;
+  /** `datasheet.isLegends` — Warhammer Legends datasheet, not legal in matched play. */
   isLegends: boolean;
+  /** `publication.isCombatPatrol` — datasheet belongs to a Combat Patrol box. */
+  isCombatPatrol: boolean;
   isFreeFromEntitlements: boolean;
   maxModelCount: number | null;
   lore: string | null;
@@ -186,6 +199,12 @@ export interface AppStratagem {
   restrictions: string | null;
 }
 
+/** A force disposition offered by a detachment (`force_disposition`). */
+export interface ForceDisposition {
+  id: string;
+  name: string;
+}
+
 export interface AppDetachment {
   id: string;
   name: string;
@@ -196,6 +215,12 @@ export interface AppDetachment {
   rules: AppDetachmentRule[];
   enhancements: AppEnhancement[];
   stratagems: AppStratagem[];
+  /**
+   * Dispositions this detachment may deploy under. Crossed with the opponent's
+   * disposition this selects the primary mission. Nearly every detachment offers
+   * exactly one; where it offers several the player chooses.
+   */
+  forceDispositions: ForceDisposition[];
 }
 
 export interface ConditionalKeywordGrant {
@@ -319,6 +344,8 @@ export interface MergedDetachment {
   enhancements: AppEnhancement[];
   stratagems: AppStratagem[];
   restrictions: string[]; // detachment unique-keyword restrictions from the DB
+  /** Dispositions offered; more than one means the player must choose. */
+  forceDispositions: ForceDisposition[];
 }
 
 // Unified mapping structure for the application
@@ -328,6 +355,8 @@ export interface MergedUnit {
   appDatasheet: Datasheet | null;
   pointsRange: { min: number; max: number };
   isCombatPatrol: boolean;
+  /** Warhammer Legends datasheet — playable, but not legal in matched play. */
+  isLegends: boolean;
   isFactionPack?: boolean;
   isAllied?: boolean;
   requiredDetachmentIds?: string[];
@@ -363,6 +392,12 @@ export interface ArmyList {
   selectedAllegianceAbilityIds?: string[];
   /** Declared sub-faction keyword names (e.g. a Space Marine Chapter). */
   selectedSubfactionKeywords?: string[];
+  /**
+   * Chosen force disposition id, keyed by detachment id. Only meaningful for a
+   * detachment offering more than one; single-disposition detachments are
+   * resolved implicitly.
+   */
+  selectedForceDispositionIds?: Record<string, string>;
   /** Legacy single-detachment fields from older saves; migrated to detachmentSlugs on load. */
   detachmentSlug?: string | null;
   detachmentName?: string | null;

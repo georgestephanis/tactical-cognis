@@ -2,7 +2,9 @@ import {
   calculateExpectedDamage, 
   getDiceDistribution, 
   expectedFlatDamageAfterFnp,
-  getExpectedDamageForExpression
+  getExpectedDamageForExpression,
+  profileAppliesToTarget,
+  selectProfilesForTarget
 } from '../src/utils/mathhammer';
 import type {
   MathhammerInput,
@@ -189,6 +191,51 @@ export function runMathhammerTests() {
   assertClose(devExpectedDmg, 2.0, 1e-4, "Devastating Wounds damage capped at model wounds");
 
   console.log("  ✅ 11th Edition Devastating Wounds: PASS");
+
+  // ==========================================
+  // 7. Conditional ("Hunter") weapon profiles
+  // ==========================================
+  console.log("Testing: Conditional Hunter Profiles");
+
+  // Placeholder shapes only — no Games Workshop datasheet values in tests.
+  const plainProfile = { name: "Alpha" };
+  const gatedProfile = { name: "Gated", hunterKeywords: ["BIGTHING", "OTHERTHING"] };
+
+  // An ordinary profile is always usable.
+  assert(profileAppliesToTarget(plainProfile, []), "Unconditional profile applies to any target");
+  assert(profileAppliesToTarget(plainProfile, ["SMALLTHING"]), "Unconditional profile ignores keywords");
+
+  // A gated profile needs at least one matching keyword; matching is OR'd and
+  // case-insensitive.
+  assert(!profileAppliesToTarget(gatedProfile, ["SMALLTHING"]), "Gated profile rejects non-matching target");
+  assert(profileAppliesToTarget(gatedProfile, ["BIGTHING"]), "Gated profile accepts first keyword");
+  assert(profileAppliesToTarget(gatedProfile, ["OTHERTHING"]), "Gated profile accepts second keyword (OR)");
+  assert(profileAppliesToTarget(gatedProfile, ["bigthing"]), "Gated profile matches case-insensitively");
+
+  // Selection must never return both statlines of a conditional weapon, which
+  // would double-count its output.
+  const conditionalWeapon = [gatedProfile, plainProfile];
+
+  const vsMatching = selectProfilesForTarget(conditionalWeapon, ["BIGTHING"]);
+  assert(vsMatching.length === 1, "Matching target selects exactly one profile");
+  assert(vsMatching[0].name === "Gated", "Matching target selects the gated profile");
+
+  const vsOther = selectProfilesForTarget(conditionalWeapon, ["SMALLTHING"]);
+  assert(vsOther.length === 1, "Non-matching target selects exactly one profile");
+  assert(vsOther[0].name === "Alpha", "Non-matching target falls back to the unconditional profile");
+
+  // A genuine multi-profile weapon (no gating) keeps every profile, since those
+  // really are simultaneously available.
+  const multiProfileWeapon = [{ name: "Alpha" }, { name: "Beta" }];
+  const bothKept = selectProfilesForTarget(multiProfileWeapon, ["SMALLTHING"]);
+  assert(bothKept.length === 2, "Unconditional multi-profile weapon keeps all profiles");
+
+  // A weapon whose only profile is gated yields nothing against a bad target,
+  // rather than silently falling back to an illegal statline.
+  const gatedOnly = selectProfilesForTarget([gatedProfile], ["SMALLTHING"]);
+  assert(gatedOnly.length === 0, "Gated-only weapon yields no profile against a non-matching target");
+
+  console.log("  ✅ Conditional Hunter Profiles: PASS");
 
   console.log("\nAll Mathhammer Unit Tests Completed Successfully! 🎉");
 }

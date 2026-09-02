@@ -293,6 +293,67 @@ export function getExpectedDamageForExpression(
   return totalExpectedDamage;
 }
 
+/**
+ * The subset of a weapon profile this module needs in order to decide whether
+ * the profile is usable against a given target. Structural, so it accepts a
+ * full `WeaponProfile` without this module depending on the data-layer types.
+ */
+export interface ConditionalProfile {
+  name?: string;
+  /**
+   * Keywords gating a "Hunter" profile. When non-empty, the profile applies
+   * ONLY against targets carrying at least one of them.
+   */
+  hunterKeywords?: string[];
+}
+
+/**
+ * True if `profile` may be used against a target with `targetKeywords`.
+ *
+ * Ordinary profiles (no `hunterKeywords`) always apply. A Hunter profile applies
+ * only when the target carries at least one of its keywords — matching is
+ * case-insensitive, and multiple keywords are OR'd, mirroring the `MONSTER/VEHICLE`
+ * form the database stores.
+ */
+export function profileAppliesToTarget(
+  profile: ConditionalProfile,
+  targetKeywords: string[]
+): boolean {
+  const gate = profile.hunterKeywords;
+  if (!gate || gate.length === 0) return true;
+  const have = new Set(targetKeywords.map(k => k.toUpperCase()));
+  return gate.some(k => have.has(k.toUpperCase()));
+}
+
+/**
+ * Picks the profiles of a single weapon that should actually be fired at a
+ * target, so callers don't double-count conditional statlines.
+ *
+ * A weapon carrying a Hunter profile is really one weapon with two mutually
+ * exclusive statlines (`Hunter` vs `Standard`): against a MONSTER or VEHICLE you
+ * use the Hunter line *instead of* the standard one, never both. Summing every
+ * profile — which is correct for a genuine multi-profile weapon such as a
+ * combi-bolter — would roughly double that weapon's output.
+ *
+ * Returns every profile unchanged for weapons with no Hunter profile.
+ */
+export function selectProfilesForTarget<T extends ConditionalProfile>(
+  profiles: T[],
+  targetKeywords: string[]
+): T[] {
+  const hasConditional = profiles.some(p => p.hunterKeywords && p.hunterKeywords.length > 0);
+  if (!hasConditional) return profiles;
+
+  const applicableHunter = profiles.find(
+    p => p.hunterKeywords && p.hunterKeywords.length > 0 && profileAppliesToTarget(p, targetKeywords)
+  );
+  if (applicableHunter) return [applicableHunter];
+
+  // Target doesn't qualify — fall back to the unconditional profile(s).
+  const standard = profiles.filter(p => !p.hunterKeywords || p.hunterKeywords.length === 0);
+  return standard.length > 0 ? standard : [];
+}
+
 export function calculateExpectedDamage(
   input: MathhammerInput,
   target: TargetProfile

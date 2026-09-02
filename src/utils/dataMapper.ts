@@ -13,7 +13,8 @@ import type {
   DetachmentWarlordRule,
   AllegianceGroup,
   AllegianceAbility,
-  ArmyRule
+  ArmyRule,
+  ForceDisposition
 } from '../types/data';
 import {
   initDatabase,
@@ -220,7 +221,13 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       maxPts = Math.max(...points);
     }
 
-    const isCombatPatrol = ds.publication?.toLowerCase().includes('combat patrol') || (minPts === 0 && ds.compositions.length > 0);
+    // Prefer the `publication.isCombatPatrol` flag; older companion DBs without
+    // that column fall back to the publication-name heuristic. The zero-points
+    // check stays as a last resort for datasheets that carry no costed
+    // composition at all.
+    const isCombatPatrol = ds.isCombatPatrol
+      || ds.publication?.toLowerCase().includes('combat patrol')
+      || (minPts === 0 && ds.compositions.length > 0);
 
     mergedUnits.push({
       name: String(ds.name),
@@ -228,6 +235,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       appDatasheet: ds,
       pointsRange: { min: minPts, max: maxPts },
       isCombatPatrol: isCombatPatrol,
+      isLegends: !!ds.isLegends,
       isFactionPack: false, // Will be updated if we add FP support back
     });
   });
@@ -251,7 +259,8 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       slug: String(ds.slug),
       appDatasheet: ds,
       pointsRange: { min: minPts, max: maxPts },
-      isCombatPatrol: false,
+      isCombatPatrol: !!ds.isCombatPatrol,
+      isLegends: !!ds.isLegends,
       isFactionPack: false,
       isAllied: true,
       requiredDetachmentIds: (u as { requiredDetachmentIds?: string[] }).requiredDetachmentIds || [],
@@ -280,6 +289,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       enhancements: AppEnhancement[];
       stratagems: AppStratagem[];
       restrictions: string[];
+      forceDispositions?: ForceDisposition[];
     };
 
     const id = String(appDet.id);
@@ -310,6 +320,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
         })),
         stratagems: appDet.stratagems || [],
         restrictions: appDet.restrictions || [],
+        forceDispositions: appDet.forceDispositions || [],
       });
     }
   });

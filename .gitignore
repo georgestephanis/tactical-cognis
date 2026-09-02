@@ -31,3 +31,6 @@ public/sql-wasm-debug.js
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Transient stash used by scripts/build_distributable.cjs
+.db-stash/
