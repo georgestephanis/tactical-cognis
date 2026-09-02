@@ -157,26 +157,44 @@ export const query = async (sql: string, params: (string | number | boolean | nu
  */
 const columnCache = new Map<string, Set<string>>();
 
+/** SQLite identifiers we're willing to interpolate into a PRAGMA. */
+const SAFE_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * Returns true if `table` has a column named `column` in the currently open DB.
  *
  * Companion-app schema versions vary, so any column added by a newer app release
  * has to be probed before it can be selected — otherwise one missing column
  * fails the entire datasheet load. Results are cached per table.
+ *
+ * `PRAGMA` does not accept bound parameters, so the table name is interpolated.
+ * It's rejected unless it's a plain identifier and then double-quoted, so a
+ * malformed call fails loudly here instead of producing a confusing SQL error
+ * somewhere downstream.
+ *
+ * SQLite identifiers are case-insensitive, so both names are compared
+ * case-insensitively — `hasColumn('datasheet', 'islegends')` must not disagree
+ * with `hasColumn('datasheet', 'isLegends')`.
  */
 export async function hasColumn(table: string, column: string): Promise<boolean> {
-  let cols = columnCache.get(table);
+  if (!SAFE_IDENTIFIER_RE.test(table)) {
+    console.warn(`hasColumn: refusing to probe unsafe table identifier "${table}"`);
+    return false;
+  }
+
+  const cacheKey = table.toLowerCase();
+  let cols = columnCache.get(cacheKey);
   if (!cols) {
     try {
-      const info = await query(`PRAGMA table_info(${table})`);
-      cols = new Set(info.map(c => String(c.name)));
+      const info = await query(`PRAGMA table_info("${table}")`);
+      cols = new Set(info.map(c => String(c.name).toLowerCase()));
     } catch (err) {
       console.warn(`Could not read schema for table "${table}":`, err);
       cols = new Set<string>();
     }
-    columnCache.set(table, cols);
+    columnCache.set(cacheKey, cols);
   }
-  return cols.has(column);
+  return cols.has(column.toLowerCase());
 }
 
 /**

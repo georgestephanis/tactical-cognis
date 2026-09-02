@@ -3280,7 +3280,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               </div>
 
               {/* Legends toggle — off by default (not matched-play legal) */}
-              {factionData?.units.some(u => u.isLegends) && (
+              {[...(factionData?.units || []), ...(factionData?.alliedUnits || [])].some(u => u.isLegends) && (
                 <label className="checkbox-row" style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                   <input
                     type="checkbox"

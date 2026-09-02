@@ -142,6 +142,23 @@ export function getDatasheetCosts(
  */
 const factionCache = new Map<string, MergedFaction>();
 
+
+/**
+ * Decides whether a datasheet belongs to a Combat Patrol box.
+ *
+ * Prefers `publication.isCombatPatrol`. Older companion DBs predate that column,
+ * so the publication-name heuristic remains as a fallback, and the zero-points
+ * check as a last resort for datasheets carrying no costed composition at all.
+ *
+ * Shared by the primary-faction and allied-unit paths so the two can't drift —
+ * an allied Combat Patrol datasheet must be recognised the same way as any other.
+ */
+function resolveIsCombatPatrol(ds: Datasheet, minPoints: number): boolean {
+  return !!ds.isCombatPatrol
+    || !!ds.publication?.toLowerCase().includes('combat patrol')
+    || (minPoints === 0 && (ds.compositions?.length ?? 0) > 0);
+}
+
 /**
  * Load and merge data from SQLite for a selected faction slug.
  */
@@ -221,13 +238,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       maxPts = Math.max(...points);
     }
 
-    // Prefer the `publication.isCombatPatrol` flag; older companion DBs without
-    // that column fall back to the publication-name heuristic. The zero-points
-    // check stays as a last resort for datasheets that carry no costed
-    // composition at all.
-    const isCombatPatrol = ds.isCombatPatrol
-      || ds.publication?.toLowerCase().includes('combat patrol')
-      || (minPts === 0 && ds.compositions.length > 0);
+    const isCombatPatrol = resolveIsCombatPatrol(ds, minPts);
 
     mergedUnits.push({
       name: String(ds.name),
@@ -259,7 +270,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       slug: String(ds.slug),
       appDatasheet: ds,
       pointsRange: { min: minPts, max: maxPts },
-      isCombatPatrol: !!ds.isCombatPatrol,
+      isCombatPatrol: resolveIsCombatPatrol(ds, minPts),
       isLegends: !!ds.isLegends,
       isFactionPack: false,
       isAllied: true,

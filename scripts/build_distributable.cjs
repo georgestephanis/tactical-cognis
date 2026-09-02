@@ -11,7 +11,11 @@ const stashDir = path.join(rootDir, '.db-stash');
 // sidecars appear whenever the DB is opened by a tool that doesn't checkpoint on
 // close (a `sqlite3` shell session, the companion app itself), and they are just
 // as much game data as the `.sqlite` file — they must never reach the bundle.
-const DB_FILE_RE = /\.(sqlite|sqlite3|db)(-wal|-shm|-journal)?$|\.bak$/i;
+//
+// The `.bak` arm is deliberately scoped to database backups (`40k.sqlite.bak`,
+// left behind by earlier versions of this script) rather than every `.bak` file,
+// so an unrelated backup in public/ isn't swept up.
+const DB_FILE_RE = /\.(sqlite|sqlite3|db)(-wal|-shm|-journal|\.bak)?$/i;
 
 console.log("=== Packaging IP-Free Distributable Application ===\n");
 
