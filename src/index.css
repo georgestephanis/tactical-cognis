@@ -1026,21 +1026,33 @@ code {
     visibility: hidden;
   }
 
-  /* Set the print slate and all its ancestors to visible */
-  .app-container,
-  main,
-  #root,
-  .overlay,
-  .print-preview-modal,
-  .print-preview-body,
-  #print-slate-root {
+  /* Re-show ONLY the print slate subtree.
+     `visibility` is resolved per element, so a visible descendant inside a
+     hidden ancestor prints fine — the ancestors deliberately stay hidden.
+     Previously the ancestors themselves were set visible, and because
+     visibility inherits, that re-showed their entire subtrees: any view content
+     not caught by the `display: none` list below printed too (the faction card
+     grid, selection glow and all). */
+  #print-slate-root,
+  #print-slate-root * {
     visibility: visible !important;
   }
 
-  /* Make sure ancestors don't print backgrounds, shadows, borders, or layout grids/scrollbars */
+  /* Structural belt to the visibility braces: drop everything in the active
+     view out of flow except the print slate overlay, so hidden-but-laid-out
+     content can't reserve space or spill onto trailing pages either. Keyed on a
+     marker class rather than a list of view-specific selectors, so a new
+     section or a new view is covered without touching this file. */
+  .view-root > *:not(.print-slate-overlay) {
+    display: none !important;
+  }
+
+  /* Ancestors stay `visibility: hidden` but still form the layout the slate sits
+     in, so strip their backgrounds, shadows, borders and scroll containers. */
   .app-container,
   main,
   #root,
+  .view-root,
   .print-preview-modal,
   .print-preview-body {
     background: transparent !important;

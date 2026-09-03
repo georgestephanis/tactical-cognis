@@ -67,6 +67,9 @@ The Import modal offers two paths that converge on the same matching pipeline (`
 Both paths match units against the faction catalog **and** allied units by normalized name, pick the closest points/model-count cost tier (`findBestCostIndex`), and surface per-unit warnings for anything that couldn't be matched.
 
 ### 5. Print Layout Engine
+
+**Print isolation.** The view's root element carries a `.view-root` marker class (see [faction_browser.md](./faction_browser.md) for the shared mechanism this fixed: a bug where builder-layout content was still visible underneath the print slate because `visibility: visible` on the ancestor chain re-showed the whole underlying tree, not just the slate).
+
 The Roster Print Slate Engine supports two black-and-white print styles:
 - **Tabular matched-play print sheet**: Outputs a layout suited for printing or PDF exports. Tabular sections (the Units Roster table, the Ranged Weapon Summary Profiles, and the Melee Weapon Summary Profiles) are separated by print-time page breaks (`break-before: page`), ensuring each summary section starts on a fresh page.
 - **Datacards Print Grid**: Prints datacards with page-break boundaries preventing cards from cutting off. The grid is centred on the page, so the left and right page margins are equal. Each card's weapons are rendered as a **table** — one row per weapon profile, with Range / A / Sk / S / AP / D columns — rather than a run-on string, and a conditional ("Hunter") profile is flagged with the keywords it requires.

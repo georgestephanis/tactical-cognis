@@ -163,7 +163,10 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
     .sort((a, b) => b.woundsPerPoint - a.woundsPerPoint);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    /* `view-root` is a print hook only — it has no on-screen styles. In print,
+       every direct child except the print slate overlay is hidden, so view
+       content can never leak onto the printout. */
+    <div className="view-root" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Navigation Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
         <button className="button-outline" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -868,7 +871,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
 
       {/* Print Preview Overlay Modal */}
       {isPrintPreviewOpen && (
-        <div className="overlay" style={{ zIndex: 1100 }}>
+        <div className="overlay print-slate-overlay" style={{ zIndex: 1100 }}>
           <div className="print-preview-modal">
             {/* Modal Header (No Print) */}
             <div className="modal-header no-print">

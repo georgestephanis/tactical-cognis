@@ -2514,7 +2514,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const independentCharacters = roster.filter(u => u.isCharacter && !u.attachedToId);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', textAlign: 'left' }}>
+    /* `view-root` is a print hook only — it has no on-screen styles. In print,
+       every direct child except the print slate overlay is hidden, so view
+       content can never leak onto the printout. */
+    <div className="view-root" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', textAlign: 'left' }}>
 
       {/* Header Panel */}
       <div
@@ -3339,7 +3342,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     const totalPoints = calculateTotalPoints();
 
     return (
-      <div className="overlay" style={{ display: 'flex' }}>
+      <div className="overlay print-slate-overlay" style={{ display: 'flex' }}>
         <div className="print-preview-modal">
 
           {/* Modal Header */}

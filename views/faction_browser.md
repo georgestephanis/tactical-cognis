@@ -30,6 +30,8 @@ Users can check cards to select units and open a **Print Preview Modal**:
 - Supports two print layouts: **Skim** (compact reference tables) and **Cards** (prints standard ID1 pocket-sized datacards).
 - Automatically triggers native browser print rules (`@media print`) which hide navigation bars, headers, and footer bars to generate pure black-and-white printouts.
 
+**Print isolation.** The view's root element carries a `.view-root` marker class. In print, everything under `.view-root` is `display: none` except the print slate overlay (`.print-slate-overlay`), and only `#print-slate-root` (and its descendants) is set `visibility: visible`. Previously the whole `.app-container`/`main` ancestor chain was re-shown, which — because `visibility` inherits — also re-showed anything in the underlying view not covered by the hand-maintained `display: none` hide-list (e.g. the faction card grid, including its `.is-selected` glow, printed underneath the Quick Skim table). The `.view-root` marker makes isolation structural instead of enumerated: it covers any current or future view content without needing a new selector added here each time.
+
 ---
 
 ## 🎨 Visual Design & Style Systems
