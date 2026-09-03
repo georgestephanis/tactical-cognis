@@ -69,9 +69,25 @@ Both paths match units against the faction catalog **and** allied units by norma
 ### 5. Print Layout Engine
 The Roster Print Slate Engine supports two black-and-white print styles:
 - **Tabular matched-play print sheet**: Outputs a layout suited for printing or PDF exports. Tabular sections (the Units Roster table, the Ranged Weapon Summary Profiles, and the Melee Weapon Summary Profiles) are separated by print-time page breaks (`break-before: page`), ensuring each summary section starts on a fresh page.
-- **Datacards Print Grid**: Prints miniature datasheet statistics formatted as standard index cards with page-break boundaries preventing cards from cutting off.
+- **Datacards Print Grid**: Prints ISO/IEC 7810 ID-1 (credit-card sized, 85.6 × 53.98 mm) cards with page-break boundaries preventing cards from cutting off. The grid is centred on the page, so the left and right page margins are equal. Each card's weapons are rendered as a **table** — one row per weapon profile, with Range / A / Sk / S / AP / D columns — rather than a run-on string, and a conditional ("Hunter") profile is flagged with the keywords it requires.
+
+**Roster hierarchy on print.** Ordering comes from `groupAttachedEntries()` in [src/utils/rosterPrint.ts](../src/utils/rosterPrint.ts) (pure, unit-tested in `tests/rosterPrint.test.ts`). The **bodyguard squad is the top-level row**, with its attached Leader and Support characters indented beneath it — Leaders first, then Support. The squad is what attachments attach *to*, so it reads as the parent, and the ordering stays correct when a squad has a Support character but no Leader (which previously left the squad indented beneath nothing). Unattached units follow as independent rows. The same function serves both the collapsed and uncollapsed views, so the two can't drift.
 
 ---
+
+### 6. Text Export Formats
+
+`generateArmyListText(format)` emits three shareable text formats, selected by `shareFormat`:
+
+| Format | Shape |
+| --- | --- |
+| `app` (default) | The companion app's own layout — one bullet per unit, with enhancement and wargear as sub-bullets. This is the round-trip format the text importer reads. |
+| `standard` | Markdown, grouped into **CHARACTER** / **BATTLELINE** / **OTHER DATASHEETS** sections. |
+| `wtc` | One flat `UNIT n: …` line per unit with an inline enhancement suffix. |
+
+**Enhancements and Upgrades.** A detachment enhancement taken by a non-Character unit (an "Upgrade", gated by `enhancement.isEquipableByNonCharacterUnit`) is stored on the *same* `enhancementName` / `enhancementPoints` fields as a Character's enhancement. Every format therefore prints it, and non-Character ones are suffixed `(Upgrade)` to keep the distinction — a suffix the text importer strips, so exports still round-trip. The tabular print sheet labels the row `Upgrade:` rather than `Enhancement:` for the same reason.
+
+Per-unit points in every format are `getUnitActualPoints()` **plus** enhancement points, so the printed unit figures add up to the printed total. (The `standard` format previously omitted the enhancement line and its points for non-Character units entirely.)
 
 ## 🎨 Visual Design & Style Systems
 

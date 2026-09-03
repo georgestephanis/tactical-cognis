@@ -296,6 +296,47 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                 </button>
               ))}
             </div>
+
+            {/* Bulk selection. Selects whatever the filters are currently
+                showing, so the Combat Patrol / Legends toggles above decide
+                whether those units are included. */}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                className="button"
+                style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}
+                disabled={filteredUnits.length === 0 || filteredUnits.every(u => selectedUnits.some(s => s.slug === u.slug))}
+                onClick={() => setSelectedUnits(prev => {
+                  const bySlug = new Map(prev.map(u => [u.slug, u]));
+                  filteredUnits.forEach(u => bySlug.set(u.slug, u));
+                  return Array.from(bySlug.values());
+                })}
+                title="Add every unit currently shown to the print selection"
+              >
+                Select all shown ({filteredUnits.length})
+              </button>
+              {selectedUnits.length > 0 && (
+                <>
+                  <button
+                    className="button-outline"
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}
+                    onClick={() => { setPrintLayout('cards'); setIsPrintPreviewOpen(true); }}
+                    title="Open the print slate for the current selection, on the Datasheet Cards layout"
+                  >
+                    Print datasheet cards ({selectedUnits.length})
+                  </button>
+                  <button
+                    className="button-outline"
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem', borderColor: 'var(--text-muted)' }}
+                    onClick={() => setSelectedUnits([])}
+                  >
+                    Clear
+                  </button>
+                </>
+              )}
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Combat Patrol and Legends units are included only when their toggles are on.
+              </span>
+            </div>
           </div>
 
           {/* Units Grid */}

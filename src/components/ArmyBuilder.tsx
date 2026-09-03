@@ -15,6 +15,8 @@ import {
   Share2
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
+import { groupAttachedEntries } from '../utils/rosterPrint';
+import type { AttachableEntry, PrintableUnitWrapper } from '../utils/rosterPrint';
 import type { MergedFaction } from '../utils/dataMapper';
 import RulesText from './RulesText';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
@@ -531,40 +533,47 @@ function generateRosterText(
     const battleline = roster.filter(u => isUnitEffectivelyBattleline(u, roster, factionData, detachmentNames, allegianceAbilityNames, subfactionKeywords));
     const other = roster.filter(u => !u.isCharacter && !isUnitEffectivelyBattleline(u, roster, factionData, detachmentNames, allegianceAbilityNames, subfactionKeywords));
 
+    /**
+     * Emits one unit and its enhancement.
+     *
+     * Every section uses this so non-Character units can't silently lose their
+     * enhancement — a detachment "Upgrade" on a non-Character unit is stored on
+     * the same `enhancementName`/`enhancementPoints` fields as a Character's
+     * enhancement, and was previously only printed in the CHARACTER section.
+     * Points come from `getUnitActualPoints` + enhancement points so the
+     * per-unit figures add up to the printed TOTAL.
+     */
+    const pushUnit = (u: RosterUnit) => {
+      const warlordTag = u.isWarlord ? ', Warlord' : '';
+      const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
+      const wargear = getRosterUnitWargear(u, factionData);
+      const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
+      const actualPoints = getUnitActualPoints(u, roster, factionData);
+      lines.push(`* **${u.name}${splitTag}** (${actualPoints + (u.enhancementPoints || 0)} points)${warlordTag}${wargearSuffix}`);
+      if (u.enhancementName) {
+        // Non-Character enhancements are "Upgrades" in the companion app; the
+        // suffix keeps that distinction while staying readable by the importer,
+        // which strips a trailing "(Upgrade)".
+        const upgradeTag = u.isCharacter ? '' : ' (Upgrade)';
+        lines.push(`  - Enhancement: ${u.enhancementName}${upgradeTag}`);
+      }
+    };
+
     if (chars.length > 0) {
       lines.push('**CHARACTER**');
-      chars.forEach(u => {
-        const warlordTag = u.isWarlord ? ', Warlord' : '';
-        const wargear = getRosterUnitWargear(u, factionData);
-        const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
-        const actualPoints = getUnitActualPoints(u, roster, factionData);
-        lines.push(`* **${u.name}** (${actualPoints + (u.enhancementPoints || 0)} points)${warlordTag}${wargearSuffix}`);
-        if (u.enhancementName) {
-          lines.push(`  - Enhancement: ${u.enhancementName}`);
-        }
-      });
+      chars.forEach(pushUnit);
       lines.push('');
     }
 
     if (battleline.length > 0) {
       lines.push('**BATTLELINE**');
-      battleline.forEach(u => {
-        const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
-        const wargear = getRosterUnitWargear(u, factionData);
-        const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
-        lines.push(`* **${u.name}${splitTag}** (${u.points} points)${wargearSuffix}`);
-      });
+      battleline.forEach(pushUnit);
       lines.push('');
     }
 
     if (other.length > 0) {
       lines.push('**OTHER DATASHEETS**');
-      other.forEach(u => {
-        const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
-        const wargear = getRosterUnitWargear(u, factionData);
-        const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
-        lines.push(`* **${u.name}${splitTag}** (${u.points} points)${wargearSuffix}`);
-      });
+      other.forEach(pushUnit);
       lines.push('');
     }
 
@@ -585,7 +594,9 @@ function generateRosterText(
       const wargear = getRosterUnitWargear(u, factionData);
       const wargearSuffix = wargear.length > 0 ? ` (${wargear.join(', ')})` : '';
       const actualPoints = getUnitActualPoints(u, roster, factionData);
-      const enhSuffix = u.enhancementName ? ` - ${u.enhancementName}` : '';
+      const enhSuffix = u.enhancementName
+        ? ` - ${u.enhancementName}${u.isCharacter ? '' : ' (Upgrade)'}`
+        : '';
       lines.push(`UNIT ${idx + 1}: ${u.name}${splitTag}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${actualPoints + (u.enhancementPoints || 0)} pts]`);
     });
 
@@ -603,7 +614,7 @@ function generateRosterText(
     const actualPoints = getUnitActualPoints(u, roster, factionData);
     lines.push(`• ${u.name}${splitTag}${warlordSuffix} (${actualPoints + (u.enhancementPoints || 0)} pts)`);
     if (u.enhancementName) {
-      lines.push(`  • Enhancement: ${u.enhancementName}`);
+      lines.push(`  • Enhancement: ${u.enhancementName}${u.isCharacter ? '' : ' (Upgrade)'}`);
     }
     const wargear = getRosterUnitWargear(u, factionData);
     wargear.forEach(gear => {
@@ -891,12 +902,19 @@ function getUnitActualPoints(unit: RosterUnit, roster: RosterUnit[], factionData
   return unit.points + extraPoints;
 }
 
-interface PrintableUnitWrapper {
-  unit: RosterUnit;
-  indent: boolean;
-  roleLabel?: string;
-  count: number;
-  pointsRange: string;
+/** One weapon profile, flattened for tabular display on a datacard. */
+interface WeaponProfileRow {
+  name: string;
+  isMelee: boolean;
+  range: string;
+  attacks: string;
+  skill: string;
+  strength: string;
+  ap: string;
+  damage: string;
+  rules: string;
+  /** Non-empty when this is a conditional "Hunter" profile. */
+  hunterKeywords: string[];
 }
 
 /**
@@ -937,78 +955,25 @@ function serializeRosterUnit(u: RosterUnit, roster: RosterUnit[], ignoreAttachme
 }
 
 /**
- * Groups and clusters leader characters with their bodyguard squads, returning a structured list for printing.
+ * Groups bodyguard squads with their attached characters, returning a structured
+ * list for printing. See `groupAttachedEntries` for the ordering.
  */
 function getPrintableRoster(
   roster: RosterUnit[],
   factionData: MergedFaction | null,
   collapseDuplicates: boolean
 ): PrintableUnitWrapper[] {
-  
+
   if (!collapseDuplicates) {
-    const result: PrintableUnitWrapper[] = [];
-    const handledIds = new Set<string>();
-
-    const bodyguards = roster.filter(u => !u.isCharacter);
-    bodyguards.forEach(bg => {
-      const attached = roster.filter(c => c.attachedToId === bg.id);
-      if (attached.length > 0) {
-        const leaders: RosterUnit[] = [];
-        const supports: RosterUnit[] = [];
-        attached.forEach(c => {
-          const cat = factionData?.units.find(u => u.slug === c.unitSlug) || (factionData?.alliedUnits && factionData.alliedUnits.find(u => u.slug === c.unitSlug));
-          const isSupport = cat?.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
-          if (isSupport) {
-            supports.push(c);
-          } else {
-            leaders.push(c);
-          }
-        });
-        leaders.forEach(l => {
-          result.push({
-            unit: l,
-            indent: false,
-            roleLabel: 'Attached Leader',
-            count: 1,
-            pointsRange: `${getUnitActualPoints(l, roster, factionData) + (l.enhancementPoints || 0)}`
-          });
-          handledIds.add(l.id);
-        });
-        result.push({
-          unit: bg,
-          indent: true,
-          roleLabel: 'Bodyguard Squad',
-          count: 1,
-          pointsRange: `${getUnitActualPoints(bg, roster, factionData) + (bg.enhancementPoints || 0)}`
-        });
-        handledIds.add(bg.id);
-        supports.forEach(s => {
-          result.push({
-            unit: s,
-            indent: true,
-            roleLabel: 'Support Character',
-            count: 1,
-            pointsRange: `${getUnitActualPoints(s, roster, factionData) + (s.enhancementPoints || 0)}`
-          });
-          handledIds.add(s.id);
-        });
-      }
-    });
-
-    roster.forEach(u => {
-      if (!handledIds.has(u.id)) {
-        result.push({
-          unit: u,
-          indent: false,
-          roleLabel: u.isCharacter ? 'Independent Character' : 'Independent Squad',
-          count: 1,
-          pointsRange: `${getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0)}`
-        });
-        handledIds.add(u.id);
-      }
-    });
-
-    return result;
+    return groupAttachedEntries(
+      roster.map(u => ({
+        id: u.id,
+        unit: u,
+        count: 1,
+        pointsRange: `${getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0)}`
+      })),
+      factionData
+    );
   }
 
   // Collapsing Identical Units!
@@ -1019,12 +984,7 @@ function getPrintableRoster(
     keyMap.get(key)!.push(u);
   });
 
-  const collapsedUnits: {
-    id: string;
-    unit: RosterUnit;
-    count: number;
-    pointsRange: string;
-  }[] = [];
+  const collapsedUnits: AttachableEntry[] = [];
 
   keyMap.forEach((group, key) => {
     const rep = { ...group[0] };
@@ -1035,6 +995,7 @@ function getPrintableRoster(
     const maxPts = Math.max(...ptsList);
     const pointsRange = minPts === maxPts ? `${minPts}` : `${minPts}-${maxPts}`;
 
+    // Re-point the attachment at the collapsed group's key so nesting survives collapsing.
     if (rep.attachedToId) {
       const bodyguard = roster.find(r => r.id === rep.attachedToId);
       if (bodyguard) {
@@ -1044,81 +1005,10 @@ function getPrintableRoster(
 
     rep.id = key;
 
-    collapsedUnits.push({
-      id: key,
-      unit: rep,
-      count,
-      pointsRange
-    });
+    collapsedUnits.push({ id: key, unit: rep, count, pointsRange });
   });
 
-  const result: PrintableUnitWrapper[] = [];
-  const handledKeys = new Set<string>();
-
-  const bodyguards = collapsedUnits.filter(cu => !cu.unit.isCharacter);
-  bodyguards.forEach(bg => {
-    const attached = collapsedUnits.filter(cu => cu.unit.attachedToId === bg.id);
-    if (attached.length > 0) {
-      const leaders: typeof collapsedUnits = [];
-      const supports: typeof collapsedUnits = [];
-
-      attached.forEach(cu => {
-        const cat = factionData?.units.find(u => u.slug === cu.unit.unitSlug) || (factionData?.alliedUnits && factionData.alliedUnits.find(u => u.slug === cu.unit.unitSlug));
-        const isSupport = cat?.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
-        if (isSupport) {
-          supports.push(cu);
-        } else {
-          leaders.push(cu);
-        }
-      });
-
-      leaders.forEach(l => {
-        result.push({
-          unit: l.unit,
-          indent: false,
-          roleLabel: 'Attached Leader',
-          count: l.count,
-          pointsRange: l.pointsRange
-        });
-        handledKeys.add(l.id);
-      });
-
-      result.push({
-        unit: bg.unit,
-        indent: true,
-        roleLabel: 'Bodyguard Squad',
-        count: bg.count,
-        pointsRange: bg.pointsRange
-      });
-      handledKeys.add(bg.id);
-
-      supports.forEach(s => {
-        result.push({
-          unit: s.unit,
-          indent: true,
-          roleLabel: 'Support Character',
-          count: s.count,
-          pointsRange: s.pointsRange
-        });
-        handledKeys.add(s.id);
-      });
-    }
-  });
-
-  collapsedUnits.forEach(cu => {
-    if (!handledKeys.has(cu.id)) {
-      result.push({
-        unit: cu.unit,
-        indent: false,
-        roleLabel: cu.unit.isCharacter ? 'Independent Character' : 'Independent Squad',
-        count: cu.count,
-        pointsRange: cu.pointsRange
-      });
-      handledKeys.add(cu.id);
-    }
-  });
-
-  return result;
+  return groupAttachedEntries(collapsedUnits, factionData);
 }
 
 interface PrintableCardWrapper {
@@ -3413,17 +3303,29 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   );
 
   // Helper function to format compact weapon profiles
-  function formatCompactWeapon(w: Weapon): string {
+  /**
+   * Flattens a weapon into one printable row per profile, so datacards can lay
+   * statlines out in a table rather than as a run-on string.
+   */
+  function getWeaponProfileRows(w: Weapon): WeaponProfileRow[] {
     return w.profiles.map(p => {
       const isMelee = p.type === 'melee';
-      const skill = isMelee ? (p.weaponSkill || '—') : (p.ballisticSkill || '—');
-      const range = isMelee ? 'M' : p.range;
-      let rulesSuffix = '';
-      if (p.rules && p.rules.length > 0) {
-        rulesSuffix = ` (${p.rules.join(', ')})`;
-      }
-      return `${w.name} [${range}, ${p.attacks}A, ${skill}, S${p.strength}, AP${p.armourPenetration}, ${p.damage}D]${rulesSuffix}`;
-    }).join(' / ');
+      return {
+        // Only qualify the name when the weapon actually has multiple profiles.
+        name: w.profiles.length > 1 && p.name && p.name !== w.name
+          ? `${w.name} — ${p.name}`
+          : w.name,
+        isMelee,
+        range: isMelee ? 'Melee' : p.range,
+        attacks: p.attacks,
+        skill: (isMelee ? p.weaponSkill : p.ballisticSkill) || '—',
+        strength: p.strength,
+        ap: p.armourPenetration,
+        damage: p.damage,
+        rules: p.rules && p.rules.length > 0 ? p.rules.join(', ') : '',
+        hunterKeywords: p.hunterKeywords || []
+      };
+    });
   }
 
   // Render modal for printing rosters
@@ -3561,7 +3463,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                       // Enhancements
                       let enhLabel = '';
                       if (unit.enhancementName) {
-                        enhLabel = `Enhancement: ${unit.enhancementName} (+${unit.enhancementPoints} pts)`;
+                        const enhKind = unit.isCharacter ? 'Enhancement' : 'Upgrade';
+                        enhLabel = `${enhKind}: ${unit.enhancementName} (+${unit.enhancementPoints} pts)`;
                       }
 
                       // Abilities list
@@ -3740,10 +3643,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                     const firstModel = ds?.models?.[0];
                     const stats = firstModel?.stats;
 
-                    // Extract and format weapon profiles compactly
-                    const formattedWeapons: string[] = [];
+                    // Flatten weapon profiles into rows, deduped, ranged before melee.
+                    const weaponRows: WeaponProfileRow[] = [];
                     if (ds) {
                       const modelCounts = getRosterUnitModelCounts(unit, ds);
+                      const seenRows = new Set<string>();
                       let isFirstActive = true;
                       ds.models.forEach(m => {
                         const totalModelCount = modelCounts[m.name] || 0;
@@ -3751,12 +3655,15 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         const activeWeapons = getUnitActiveWeapons(unit, m, totalModelCount, isFirstActive);
                         isFirstActive = false;
                         activeWeapons.forEach(w => {
-                          const formatted = formatCompactWeapon(w);
-                          if (!formattedWeapons.includes(formatted)) {
-                            formattedWeapons.push(formatted);
-                          }
+                          getWeaponProfileRows(w).forEach(row => {
+                            const key = `${row.name}|${row.range}|${row.attacks}|${row.skill}|${row.strength}|${row.ap}|${row.damage}`;
+                            if (seenRows.has(key)) return;
+                            seenRows.add(key);
+                            weaponRows.push(row);
+                          });
                         });
                       });
+                      weaponRows.sort((a, b) => Number(a.isMelee) - Number(b.isMelee));
                     }
 
                     // Abilities list
@@ -3844,11 +3751,40 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                           </div>
                         )}
 
-                        {/* Weapons List */}
-                        {formattedWeapons.length > 0 && (
-                          <div className="id1-datacard-weapons-list">
-                            <strong>Wpn:</strong> {formattedWeapons.join('; ')}
-                          </div>
+                        {/* Weapon profiles — tabular, one row per profile */}
+                        {weaponRows.length > 0 && (
+                          <table className="id1-datacard-weapons">
+                            <thead>
+                              <tr>
+                                <th className="wpn-name">Weapon</th>
+                                <th>Rng</th>
+                                <th>A</th>
+                                <th>Sk</th>
+                                <th>S</th>
+                                <th>AP</th>
+                                <th>D</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {weaponRows.map((row, i) => (
+                                <tr key={i}>
+                                  <td className="wpn-name">
+                                    {row.name}
+                                    {row.hunterKeywords.length > 0 && (
+                                      <span className="wpn-gate"> vs {row.hunterKeywords.join('/')}</span>
+                                    )}
+                                    {row.rules && <span className="wpn-rules"> [{row.rules}]</span>}
+                                  </td>
+                                  <td>{row.range}</td>
+                                  <td>{row.attacks}</td>
+                                  <td>{row.skill}</td>
+                                  <td>{row.strength}</td>
+                                  <td>{row.ap}</td>
+                                  <td>{row.damage}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         )}
 
                         {/* Abilities list */}

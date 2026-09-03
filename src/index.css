@@ -1289,7 +1289,12 @@ code {
     padding: 0 !important;
     background: transparent !important;
     border: none !important;
-    justify-content: flex-start !important;
+    /* Centre the fixed-width card columns so the left and right page margins
+       are equal. `flex-start` left-aligned them and dumped all the slack on
+       the right-hand side of the sheet. */
+    justify-content: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
 
   .id1-datacard {
@@ -1406,11 +1411,56 @@ code {
   text-overflow: ellipsis;
 }
 
-.id1-datacard-weapons-list {
-  font-size: 5.5pt;
-  line-height: 1.05;
-  color: #334155;
+/* Weapon profiles on a datacard, laid out as a table. Very tight — an ID-1 card
+   is 85.6 x 53.98mm, so this has to stay legible at ~5pt. */
+.id1-datacard-weapons {
+  width: 100%;
+  border-collapse: collapse;
   margin-top: 0.25mm;
+  table-layout: fixed;
+}
+
+.id1-datacard-weapons th,
+.id1-datacard-weapons td {
+  border: 0.15mm solid #e2e8f0;
+  padding: 0.2mm 0.4mm;
+  font-size: 5pt;
+  line-height: 1.05;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.id1-datacard-weapons th {
+  background: #f1f5f9;
+  font-weight: 700;
+  color: #475569;
+}
+
+.id1-datacard-weapons td {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+/* The name column carries the prose (profile name, rules, gating), so it gets
+   the slack and is the only left-aligned cell. */
+.id1-datacard-weapons th.wpn-name,
+.id1-datacard-weapons td.wpn-name {
+  text-align: left;
+  width: 46%;
+}
+
+.id1-datacard-weapons .wpn-rules {
+  font-weight: 400;
+  color: #64748b;
+}
+
+/* Conditional ("Hunter") profile — flag it so the row isn't mistaken for one
+   that can be used against anything. */
+.id1-datacard-weapons .wpn-gate {
+  font-weight: 700;
+  color: #b45309;
 }
 
 .id1-datacard-abilities-list {

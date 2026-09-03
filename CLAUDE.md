@@ -27,18 +27,18 @@ npm run db:find                # Mac only: scan ~/Library/Containers for the com
 npm run db:sanitize            # Copy the DB minus companion-app personal data (rosters, favourites, entitlements) → public/40k-scrubbed.sqlite
 npm run refresh                # Mac only: db:find + db:sanitize --force — pull the latest companion DB and re-scrub it
 npm run lint                   # eslint .
-npm test                       # Run zero-dependency mathhammer unit tests
+npm test                       # Run zero-dependency unit tests (mathhammer + roster print ordering)
 ```
 
 ## Commands & Testing
 
-Unit tests are located in [tests/mathhammer.test.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/tests/mathhammer.test.ts). Execute them with:
+Unit tests live in `tests/` — [mathhammer.test.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/tests/mathhammer.test.ts) (combat math, conditional profile selection) and [rosterPrint.test.ts](https://github.com/georgestephanis/tactical-cognis/blob/trunk/tests/rosterPrint.test.ts) (print hierarchy ordering). Execute them with:
 
 ```bash
 npm test
 ```
 
-Prefer this pattern (plain asserts, zero-dependency, run via `tsx`) if you add coverage for other logic.
+Prefer this pattern (plain asserts, zero-dependency, run via `tsx`) if you add coverage for other logic. `tests/` is typechecked by `tsc -b`, so tests must compile — and Node globals like `process` aren't typed here, so `throw` on failure rather than calling `process.exit`. Test fixtures must use obviously-fake placeholder names, never real datasheet values.
 
 `npm run dev` / `npm run build` both run `copy-data.js` first (via `predev`/`prebuild`) to stage the `sql.js` WASM runtime into `public/`.
 
@@ -59,6 +59,7 @@ Prefer this pattern (plain asserts, zero-dependency, run via `tsx`) if you add c
 - `src/utils/db.ts` — the only place that talks to `sql.js`. Loads the WASM runtime, opens the DB (from `/40k.sqlite` fetch or an uploaded buffer), exposes query helpers — including allied-unit helpers (`getAlliedUnitsForFaction`/`getAlliedLimitsForFaction`), saved-roster import helpers (`getSavedDbRosters`/`getDbRosterDetail`, which read the user's own `roster*` tables), and the list-legality/allegiance helpers that feed Army Builder validation (`getConditionalKeywordGrants`, `getExcludedDatasheets`, `getKeywordRestrictionGroups`, `getDetachmentWarlordRules`, `getAllegianceGroups`, `getArmyRules`). Companion-app schema versions vary, so probe version-sensitive tables with `PRAGMA table_info` and degrade gracefully rather than letting one missing column fail a whole load (see the `wargear_limit` handling — every legality helper is `try/catch`-guarded the same way). The database schema is documented in `DB.md` and the data layer details are mapped in [docs/data_architecture.md](./docs/data_architecture.md).
 - `src/utils/dataMapper.ts` — maps raw DB rows into the `MergedUnit`/`MergedFaction` shapes the UI consumes.
 - `src/utils/mathhammer.ts` — pure combat-math engine (hit/wound/save/damage expectation, devastating wounds, FNP, AP reduction, etc.), no DB or React dependency. Also owns conditional-profile selection (`profileAppliesToTarget`, `selectProfilesForTarget`) — keep that logic here, structural and dependency-free, so it stays unit-testable. The mathematical equations are documented in [docs/mathhammer_engine.md](./docs/mathhammer_engine.md).
+- `src/utils/rosterPrint.ts` — pure print-layout helpers for the Army Builder's export (`groupAttachedEntries` decides the squad/attachment hierarchy). Lives outside the component so it can be unit-tested without React, and because `react-refresh` rejects non-component exports from a component file — put new pure logic here rather than exporting it from `ArmyBuilder.tsx`.
 - `src/components/` — one component per view (`Dashboard`, `FactionBrowser`, `UnitDetails`, `ArmyBuilder`, `DeepAnalysis`) plus `DatabaseUploadView` for the no-DB fallback and `RulesText`, the shared safe renderer for the DB's inline rules markup (DOMParser → React nodes, no `dangerouslySetInnerHTML`). Detailed view maps are in [views/README.md](./views/README.md).
 - This is a browser-only app — no Electron, no desktop shell. `scripts/find-db.cjs` (`npm run db:find`) is a plain Node script for local dev convenience only; it never runs as part of the build.
 
