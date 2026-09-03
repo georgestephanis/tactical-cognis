@@ -67,11 +67,45 @@ The Import modal offers two paths that converge on the same matching pipeline (`
 Both paths match units against the faction catalog **and** allied units by normalized name, pick the closest points/model-count cost tier (`findBestCostIndex`), and surface per-unit warnings for anything that couldn't be matched.
 
 ### 5. Print Layout Engine
+
+**Print isolation.** The view's root element carries a `.view-root` marker class (see [faction_browser.md](./faction_browser.md) for the shared mechanism this fixed: a bug where builder-layout content was still visible underneath the print slate because `visibility: visible` on the ancestor chain re-showed the whole underlying tree, not just the slate).
+
 The Roster Print Slate Engine supports two black-and-white print styles:
 - **Tabular matched-play print sheet**: Outputs a layout suited for printing or PDF exports. Tabular sections (the Units Roster table, the Ranged Weapon Summary Profiles, and the Melee Weapon Summary Profiles) are separated by print-time page breaks (`break-before: page`), ensuring each summary section starts on a fresh page.
-- **Datacards Print Grid**: Prints miniature datasheet statistics formatted as standard index cards with page-break boundaries preventing cards from cutting off.
+- **Datacards Print Grid**: Prints datacards with page-break boundaries preventing cards from cutting off. The grid is centred on the page, so the left and right page margins are equal. Each card's weapons are rendered as a **table** — one row per weapon profile, with Range / A / Sk / S / AP / D columns — rather than a run-on string, and a conditional ("Hunter") profile is flagged with the keywords it requires.
+
+**Card size.** A three-way toggle (`cardSize`, shown only on the datacard layout) picks the footprint, applied as a `cards-size-*` class on `.print-cards-grid`:
+
+| Size | Footprint | Per row | Type scale |
+| --- | --- | --- | --- |
+| `id1` (default) | Exactly 85.60 × 53.98 mm — ISO/IEC 7810 ID-1, i.e. credit-card | 2 | 1× |
+| `half` | Half the **printable width** of the sheet, min-height 70 mm | 2 | 1.45× |
+| `full` | Full printable width, min-height 90 mm | 1 | 2× |
+
+Two things make this more than a box resize:
+
+- **`--card-scale`** is a custom property set by each size class, and every font size, padding and corner radius inside a card is a `calc()` against it. So a larger card buys legibility (weapon tables go from 5pt to 10pt at full width), not just whitespace.
+- **Half and full are relative, not fixed.** They use `1fr` grid tracks rather than hardcoded millimetres, so they adapt to whatever paper size and page margins the browser is using. Only ID-1 is a fixed measurement, because it's a spec.
+
+ID-1 keeps `overflow: hidden` and its exact height — content that doesn't fit is clipped, which is the trade-off for the spec size. The larger sizes exist precisely to *show* that content, so they switch to an auto height with a min-height, let long keyword and weapon text wrap instead of ellipsing, and pack content to the top rather than spreading it.
+
+**Roster hierarchy on print.** Ordering comes from `groupAttachedEntries()` in [src/utils/rosterPrint.ts](../src/utils/rosterPrint.ts) (pure, unit-tested in `tests/rosterPrint.test.ts`). The **bodyguard squad is the top-level row**, with its attached Leader and Support characters indented beneath it — Leaders first, then Support. The squad is what attachments attach *to*, so it reads as the parent, and the ordering stays correct when a squad has a Support character but no Leader (which previously left the squad indented beneath nothing). Unattached units follow as independent rows. The same function serves both the collapsed and uncollapsed views, so the two can't drift.
 
 ---
+
+### 6. Text Export Formats
+
+`generateArmyListText(format)` emits three shareable text formats, selected by `shareFormat`:
+
+| Format | Shape |
+| --- | --- |
+| `app` (default) | The companion app's own layout — one bullet per unit, with enhancement and wargear as sub-bullets. This is the round-trip format the text importer reads. |
+| `standard` | Markdown, grouped into **CHARACTER** / **BATTLELINE** / **OTHER DATASHEETS** sections. |
+| `wtc` | One flat `UNIT n: …` line per unit with an inline enhancement suffix. |
+
+**Enhancements and Upgrades.** A detachment enhancement taken by a non-Character unit (an "Upgrade", gated by `enhancement.isEquipableByNonCharacterUnit`) is stored on the *same* `enhancementName` / `enhancementPoints` fields as a Character's enhancement. Every format therefore prints it, and non-Character ones are suffixed `(Upgrade)` to keep the distinction — a suffix the text importer strips, so exports still round-trip. The tabular print sheet labels the row `Upgrade:` rather than `Enhancement:` for the same reason.
+
+Per-unit points in every format are `getUnitActualPoints()` **plus** enhancement points, so the printed unit figures add up to the printed total. (The `standard` format previously omitted the enhancement line and its points for non-Character units entirely.)
 
 ## 🎨 Visual Design & Style Systems
 
@@ -94,6 +128,7 @@ The editor uses a split-screen grid layout:
 
 ### Persistence
 - Roster lists are saved as serialized JSON in the browser's `localStorage` under the key `'tactical_cognis_armies'`.
+- Print-slate preferences (`printLayout`, `cardSize`, `collapseDuplicates`) are component state only — they are not persisted, and reset to Tabular / ID-1 / uncollapsed each session.
 
 ---
 
