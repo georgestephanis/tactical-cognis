@@ -1317,6 +1317,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState<boolean>(false);
   const [printLayout, setPrintLayout] = useState<'tabular' | 'datacards'>('tabular');
   const [collapseDuplicates, setCollapseDuplicates] = useState<boolean>(false);
+  // Datacard footprint. 'id1' is the exact credit-card spec size; 'half' and
+  // 'full' are fractions of the printable width of the sheet, and scale the
+  // card's type up with them.
+  const [cardSize, setCardSize] = useState<'id1' | 'half' | 'full'>('id1');
 
   // Import states
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
@@ -3343,7 +3347,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
             <div>
               <h3 style={{ textTransform: 'uppercase', color: 'var(--text-primary)', fontSize: '1.2rem' }}>Roster Print Slate Engine</h3>
               <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                Configure tabular matched-play sheets or credit-card-sized ID-1 datacards.
+                Configure tabular matched-play sheets, or datacards at ID-1, half-width or full-width.
               </p>
             </div>
 
@@ -3363,9 +3367,30 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   onClick={() => setPrintLayout('datacards')}
                   style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
                 >
-                  ID-1 Datacards
+                  Datacards
                 </button>
               </div>
+
+              {/* Card size — only meaningful on the datacard layout */}
+              {printLayout === 'datacards' && (
+                <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-tertiary)', padding: '0.25rem', borderRadius: '8px' }}>
+                  {([
+                    { id: 'id1', label: 'ID-1', title: 'Exact credit-card size (85.60mm x 53.98mm), 2 per row' },
+                    { id: 'half', label: 'Half Width', title: 'Half the printable width of the sheet, 2 per row, larger type' },
+                    { id: 'full', label: 'Full Width', title: 'Full printable width of the sheet, 1 per row, largest type' }
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.id}
+                      className={`tab-btn ${cardSize === opt.id ? 'active' : ''}`}
+                      onClick={() => setCardSize(opt.id)}
+                      style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+                      title={opt.title}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <button
                 className="button"
@@ -3396,7 +3421,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
                   {printLayout === 'tabular'
                     ? 'Displays a neat battle-ready summary sheet. Adjust page settings to print portrait.'
-                    : 'Displays ID-1 credit card size datacards (85.60mm x 53.98mm) with cutting outlines.'
+                    : cardSize === 'id1'
+                      ? 'ID-1 credit card size datacards (85.60mm x 53.98mm), two per row, with cutting outlines. Content that overflows a card is clipped at this size.'
+                      : cardSize === 'half'
+                        ? 'Datacards at half the printable width of the sheet, two per row, with larger type and room for full weapon tables.'
+                        : 'Datacards at the full printable width of the sheet, one per row, with the largest type.'
                   }
                 </p>
               </div>
@@ -3633,8 +3662,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 })()}
               </div>
             ) : (
-              // 2. ISO/IEC 7810 ID-1 Datacards Print Grid
-              <div className="print-cards-grid">
+              // 2. Datacards print grid — ID-1 (ISO/IEC 7810), half-width or full-width
+              <div className={`print-cards-grid cards-size-${cardSize}`}>
                 {(() => {
                   const cardList = getPrintableCardsRoster(roster, factionData, collapseDuplicates);
                   return cardList.map(({ id, unit, pointsDisplay }) => {

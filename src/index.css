@@ -1284,38 +1284,73 @@ code {
   /* Roster printing grids and card layouts in print mode */
   .print-cards-grid {
     display: grid !important;
-    grid-template-columns: repeat(2, 85.60mm) !important;
     gap: 4mm 6mm !important;
     padding: 0 !important;
     background: transparent !important;
     border: none !important;
-    /* Centre the fixed-width card columns so the left and right page margins
-       are equal. `flex-start` left-aligned them and dumped all the slack on
-       the right-hand side of the sheet. */
+    /* Centre the card columns so the left and right page margins are equal.
+       `flex-start` left-aligned them and dumped all the slack on the
+       right-hand side of the sheet. */
     justify-content: center !important;
     margin-left: auto !important;
     margin-right: auto !important;
   }
 
+  /* ID-1: exact credit-card columns, so the fixed width sets the track. */
+  .print-cards-grid.cards-size-id1 {
+    grid-template-columns: repeat(2, 85.60mm) !important;
+  }
+
+  /* Half and full width are relative to the printable width of the sheet,
+     so they adapt to whatever paper size and margins the browser uses. */
+  .print-cards-grid.cards-size-half {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  .print-cards-grid.cards-size-full {
+    grid-template-columns: 1fr !important;
+  }
+
   .id1-datacard {
-    width: 85.60mm !important;
-    height: 53.98mm !important;
     border: 0.3mm solid #000 !important;
     box-shadow: none !important;
     margin: 0 !important;
-    padding: 2mm !important;
+    padding: calc(2mm * var(--card-scale)) !important;
     background: #fff !important;
     color: #000 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
     page-break-inside: avoid !important;
   }
+
+  /* ID-1 is a spec size (85.60 x 53.98mm), so it stays exact and clips
+     anything that doesn't fit. The larger sizes exist to *show* that content,
+     so they grow with it instead. */
+  .cards-size-id1 .id1-datacard {
+    width: 85.60mm !important;
+    height: 53.98mm !important;
+    overflow: hidden !important;
+  }
+
+  .cards-size-half .id1-datacard,
+  .cards-size-full .id1-datacard {
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    justify-content: flex-start !important;
+  }
+
+  .cards-size-half .id1-datacard { min-height: 70mm !important; }
+  .cards-size-full .id1-datacard { min-height: 90mm !important; }
 }
 
 /* Screen styles for print preview modal */
 .print-cards-grid {
+  /* Multiplies every font size, padding and radius inside a card, so choosing a
+     larger card actually buys legibility rather than just whitespace.
+     Overridden by the .cards-size-* modifiers below. */
+  --card-scale: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(85.60mm, 1fr));
   gap: 16px;
   padding: 1.5rem;
   justify-content: center;
@@ -1324,12 +1359,45 @@ code {
   border: 1px solid #cbd5e1;
 }
 
-.id1-datacard {
+.print-cards-grid.cards-size-id1 {
+  --card-scale: 1;
+  grid-template-columns: repeat(auto-fill, minmax(85.60mm, 85.60mm));
+}
+
+.print-cards-grid.cards-size-half {
+  --card-scale: 1.45;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.print-cards-grid.cards-size-full {
+  --card-scale: 2;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cards-size-id1 .id1-datacard {
   width: 85.60mm;
   height: 53.98mm;
+  overflow: hidden;
+}
+
+.cards-size-half .id1-datacard,
+.cards-size-full .id1-datacard {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  /* ID-1 relies on `space-between` to push content to the card edges of a
+     fixed-height box. With an auto height and a min-height, that would strand
+     a gap in the middle of a sparse card, so pack to the top instead. */
+  justify-content: flex-start;
+}
+
+.cards-size-half .id1-datacard { min-height: 70mm; }
+.cards-size-full .id1-datacard { min-height: 90mm; }
+
+.id1-datacard {
   border: 1px solid #1e293b;
-  border-radius: 3.18mm;
-  padding: 2.5mm;
+  border-radius: calc(3.18mm * var(--card-scale));
+  padding: calc(2.5mm * var(--card-scale));
   box-sizing: border-box;
   background: #ffffff;
   color: #0f172a;
@@ -1348,13 +1416,13 @@ code {
   justify-content: space-between;
   align-items: center;
   border-bottom: 0.4mm solid #0f172a;
-  padding-bottom: 0.25mm;
-  margin-bottom: 0.5mm;
+  padding-bottom: calc(0.25mm * var(--card-scale));
+  margin-bottom: calc(0.5mm * var(--card-scale));
 }
 
 .id1-datacard-title {
   font-weight: 800;
-  font-size: 7.5pt;
+  font-size: calc(7.5pt * var(--card-scale));
   text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
@@ -1364,22 +1432,22 @@ code {
 
 .id1-datacard-points {
   font-weight: 700;
-  font-size: 7.5pt;
+  font-size: calc(7.5pt * var(--card-scale));
   white-space: nowrap;
 }
 
 .id1-datacard-stats {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 0.5mm;
+  margin-bottom: calc(0.5mm * var(--card-scale));
 }
 
 .id1-datacard-stats th,
 .id1-datacard-stats td {
   border: 0.15mm solid #cbd5e1;
-  padding: 1px 2px;
+  padding: calc(1px * var(--card-scale)) calc(2px * var(--card-scale));
   text-align: center;
-  font-size: 6.5pt;
+  font-size: calc(6.5pt * var(--card-scale));
   line-height: 1;
 }
 
@@ -1398,11 +1466,11 @@ code {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.5mm;
-  font-size: 6pt;
+  gap: calc(0.5mm * var(--card-scale));
+  font-size: calc(6pt * var(--card-scale));
   line-height: 1.1;
   overflow: hidden;
-  margin-top: 0.5mm;
+  margin-top: calc(0.5mm * var(--card-scale));
 }
 
 .id1-datacard-row {
@@ -1416,15 +1484,15 @@ code {
 .id1-datacard-weapons {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 0.25mm;
+  margin-top: calc(0.25mm * var(--card-scale));
   table-layout: fixed;
 }
 
 .id1-datacard-weapons th,
 .id1-datacard-weapons td {
   border: 0.15mm solid #e2e8f0;
-  padding: 0.2mm 0.4mm;
-  font-size: 5pt;
+  padding: calc(0.2mm * var(--card-scale)) calc(0.4mm * var(--card-scale));
+  font-size: calc(5pt * var(--card-scale));
   line-height: 1.05;
   text-align: center;
   overflow: hidden;
@@ -1464,10 +1532,39 @@ code {
 }
 
 .id1-datacard-abilities-list {
-  font-size: 5.5pt;
+  font-size: calc(5.5pt * var(--card-scale));
   line-height: 1.05;
   color: #334155;
-  margin-top: 0.25mm;
+  margin-top: calc(0.25mm * var(--card-scale));
+}
+
+/* On the larger card sizes the point is to *see* everything, so undo the
+   truncation ID-1 needs to stay within 85.60 x 53.98mm: let the body grow, let
+   long keyword and weapon text wrap instead of ellipsing, and stop capping the
+   title width. */
+.cards-size-half .id1-datacard-body,
+.cards-size-full .id1-datacard-body {
+  overflow: visible;
+}
+
+.cards-size-half .id1-datacard-row,
+.cards-size-full .id1-datacard-row {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.cards-size-half .id1-datacard-title,
+.cards-size-full .id1-datacard-title {
+  max-width: 75%;
+  white-space: normal;
+}
+
+.cards-size-half .id1-datacard-weapons td.wpn-name,
+.cards-size-full .id1-datacard-weapons td.wpn-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .print-bw-roster-header {
