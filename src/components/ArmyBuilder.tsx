@@ -19,6 +19,7 @@ import { groupAttachedEntries } from '../utils/rosterPrint';
 import type { AttachableEntry, PrintableUnitWrapper } from '../utils/rosterPrint';
 import type { MergedFaction } from '../utils/dataMapper';
 import RulesText from './RulesText';
+import DetachmentHovercard from './DetachmentHovercard';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
 import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet, AppEnhancement, ConditionalKeywordGrant } from '../types/data';
@@ -796,6 +797,39 @@ function isUnitEligibleForEnhancement(unitKeywords: string[], enhancement: AppEn
 }
 
 /**
+ * Resolves the leader/support bodyguard grant conferred by a character's currently
+ * equipped enhancement, if any (`enhancement_bodyguard_group*` — e.g. Kaptin's Hat
+ * additionally letting its wearer lead Flash Gitz). Independent of the unit's
+ * intrinsic `leads` list.
+ */
+function getEnhancementBodyguardGrant(
+  enhancementName: string | undefined,
+  factionData: MergedFaction | null
+): { targetName: string; bodyguardType: string }[] {
+  if (!enhancementName || !factionData) return [];
+  for (const det of factionData.detachments || []) {
+    const enh = det.enhancements.find(e => e.name === enhancementName);
+    if (enh?.grantsLeadership?.length) return enh.grantsLeadership;
+  }
+  return [];
+}
+
+/** Does an enhancement-granted leadership list cover this squad, by unit name or keyword? */
+function matchEnhancementGrant(
+  grants: { targetName: string; bodyguardType: string }[],
+  bodyguard: RosterUnit,
+  bgCatalogUnit: MergedUnit | undefined
+): { targetName: string; bodyguardType: string } | undefined {
+  if (grants.length === 0) return undefined;
+  const normBg = normalizeName(bodyguard.name);
+  const bgKeywords = (bgCatalogUnit?.appDatasheet?.models?.[0]?.keywords || []).map(normalizeName);
+  return grants.find(g => {
+    const normTarget = normalizeName(g.targetName);
+    return normTarget === normBg || bgKeywords.includes(normTarget);
+  });
+}
+
+/**
  * Validates whether a character can attach to a bodyguard squad under leader/support limits.
  */
 function canAttachCharacterToSquad(
@@ -824,7 +858,9 @@ function canAttachCharacterToSquad(
   if (prospectiveEnhancements > 1) {
     return { allowed: false, reason: 'Attached group cannot have >1 enhancement' };
   }
-  const isSupport = charCatalog.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
+  const characterGrant = matchEnhancementGrant(getEnhancementBodyguardGrant(character.enhancementName, factionData), bodyguard, bgCatalog);
+  const isSupport = (charCatalog.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false)
+    || characterGrant?.bodyguardType === 'support';
   const isWarboss = charCatalog.appDatasheet?.models?.[0]?.keywords?.some(k => k.toLowerCase() === 'warboss') || false;
 
   // Calculate attached counts
@@ -834,7 +870,9 @@ function canAttachCharacterToSquad(
 
   attached.forEach(c => {
     const cCat = factionData.units.find(u => u.slug === c.unitSlug) || (factionData.alliedUnits && factionData.alliedUnits.find(u => u.slug === c.unitSlug));
-    const cIsSupport = cCat?.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false;
+    const cGrant = matchEnhancementGrant(getEnhancementBodyguardGrant(c.enhancementName, factionData), bodyguard, bgCatalog);
+    const cIsSupport = (cCat?.appDatasheet?.rules?.some(r => r.name.toLowerCase() === 'support') || false)
+      || cGrant?.bodyguardType === 'support';
     const cIsWarboss = cCat?.appDatasheet?.models?.[0]?.keywords?.some(k => k.toLowerCase() === 'warboss') || false;
     
     if (cIsSupport) {
@@ -1444,8 +1482,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     const normBodyguardName = normalizeName(bodyguard.name);
     const leadsNormalized = (datasheet.leads || []).map(normalizeName);
+    if (leadsNormalized.includes(normBodyguardName)) return true;
 
-    return leadsNormalized.includes(normBodyguardName);
+    // An equipped enhancement can additionally grant leadership of a squad the
+    // unit couldn't otherwise lead (e.g. Kaptin's Hat → Flash Gitz).
+    const grant = matchEnhancementGrant(
+      getEnhancementBodyguardGrant(character.enhancementName, factionData),
+      bodyguard,
+      findCatalogUnit(bodyguard.unitSlug)
+    );
+    return !!grant;
   };
 
   const mustBeWarlord = React.useCallback((unitSlug: string): boolean => {
@@ -2834,9 +2880,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         <option value="">-- Add Detachment --</option>
                         {availableDetachments.map(d => {
                           const cost = d.detachmentPointsCost || 0;
+                          const dispositions = (d.forceDispositions || []).map(fd => fd.name).join('/');
                           return (
                             <option key={d.slug} value={d.slug}>
-                              {d.name} ({cost} DP){d.isFactionPack ? ' (Faction Pack)' : ''}
+                              {d.name} ({cost} DP){d.isFactionPack ? ' (Faction Pack)' : ''}{dispositions ? ` — ${dispositions}` : ''}
                             </option>
                           );
                         })}
@@ -2855,9 +2902,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                     {selectedDetachments.map(d => (
                       <span
                         key={d.slug}
+                        className="detachment-chip"
+                        tabIndex={0}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--bg-tertiary)', border: '1px solid var(--glass-border)', borderRadius: '6px', padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
                       >
                         {d.name} <span style={{ color: 'var(--text-muted)' }}>({d.detachmentPointsCost || 0} DP)</span>
+                        {(d.forceDispositions || []).length > 0 && (
+                          <span style={{ color: 'var(--accent-teal)', fontSize: '0.75rem' }}>
+                            {d.forceDispositions.map(fd => fd.name).join('/')}
+                          </span>
+                        )}
                         <button
                           onClick={() => handleRemoveDetachment(d.slug)}
                           aria-label={`Remove ${d.name}`}
@@ -2865,6 +2919,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         >
                           ×
                         </button>
+                        <DetachmentHovercard detachment={d} />
                       </span>
                     ))}
                   </div>

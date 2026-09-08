@@ -114,7 +114,8 @@ the shape doesn't.
 | `detachment_unique_keyword` | — | keyword uniqueness restrictions within the detachment |
 | `detachment_detail*`, `detachment_force_disposition`, `detachment_*_datasheet`, `detachment_*_warlord_miniature` | — | flavour bullets, force-disposition link, composition/warlord gating |
 | `enhancement` | 957 | `name`, `rules`, `basePointsCost` (INTEGER), `detachmentId`, `enhancementType`, `cannotBeWarlord` |
-| `enhancement_*` (keyword groups, bodyguard groups, required wargear) | — | which units may take each enhancement |
+| `enhancement_*` (keyword groups, required wargear) | — | which units may take each enhancement |
+| `enhancement_*` (`bodyguard_group(_datasheet/_keyword)`) | — | which squad(s) an enhancement additionally lets its wearer lead/support, once taken |
 | `stratagem` | 1,432 | `name`, `cpCost` (TEXT), `category` (`battleTactic`/`epicDeed`/`strategicPloy`/…), `whenRules`/`targetRules`/`effectRules`/`restrictionRules`, `key`, `detachmentId` |
 | `stratagem_phase` | — | phases each stratagem can fire in |
 
@@ -125,6 +126,8 @@ the shape doesn't.
 | `datasheet_bodyguard_group` | `datasheetId` (the **leader**), `factionKeywordId`, `requiredDetachmentId`, `excludedDetachmentId` |
 | `datasheet_bodyguard_group_datasheet` | `datasheetBodyguardGroupId`, `datasheetId` (a **bodyguard** unit the leader may join) |
 | `datasheet_bodyguard_group_keyword` | keyword-based bodyguard gating |
+| `enhancement_bodyguard_group` | `enhancementId` (the **leader** only while this enhancement is equipped), `bodyguardType` (`leader`/`support`) — mirrors `datasheet_bodyguard_group` but scoped to an equipped enhancement instead of being intrinsic to the datasheet (e.g. Orks' *Kaptin's Hat* → Flash Gitz) |
+| `enhancement_bodyguard_group_datasheet` / `_keyword` | the bodyguard unit(s)/keyword the enhancement additionally permits leading |
 
 ### Keywords, allies, missions, publications
 
@@ -196,7 +199,7 @@ All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
 |---|---|
 | Faction list (`getFactionList`) | `faction_keyword`, `datasheet_faction_keyword`, `detachment_faction_keyword` |
 | Units per faction (`getUnitsByFaction`) | `datasheet`, `publication`, `datasheet_faction_keyword`, `miniature`, `miniature_keyword`, `keyword`, `unit_composition(_miniature)`, `datasheet_points_step`, `datasheet_datasheet_ability`, `datasheet_ability`, `datasheet_bodyguard_group(_datasheet/_keyword)`, `wargear_item`, `wargear_item_profile`, `wargear_item_profile_wargear_ability`, `wargear_ability`, `base_miniature_loadout(_wargear_option)`, `wargear_option`, `loadout_choice_set`, `loadout_choice`, `loadout_choice_wargear_item`, `limited_wargear_choice_set`, `limited_wargear_choice`, `limited_wargear_choice_wargear_item`, `wargear_limit` |
-| Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement` (+ `enhancement_required_keyword_group`, `enhancement_required_keyword`, `enhancement_excluded_keyword`, `enhancement_required_bodyguard_group`, `enhancement_required_bodyguard_datasheet`, `enhancement_required_wargear`), `stratagem`, `detachment_unique_keyword`, `detachment_force_disposition`, `force_disposition` |
+| Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement` (+ `enhancement_required_keyword_group`, `enhancement_required_keyword_group_keyword`, `enhancement_excluded_keyword`, `enhancement_bodyguard_group`, `enhancement_bodyguard_group_datasheet`, `enhancement_bodyguard_group_keyword`), `stratagem`, `detachment_unique_keyword`, `detachment_force_disposition`, `force_disposition` |
 | Army Builder game-size limits (`getBattleSizes`) | `battle_size` |
 | Allied units + caps (`getAlliedUnitsForFaction`, `getAlliedLimitsForFaction`) | `faction_keyword_allied_faction`, `allied_faction_datasheet`, `allied_faction_required_detachment`, `allied_faction_keyword`, `allied_faction_points_limit`, `battle_size`, `keyword`, `datasheet`, `publication` |
 | Conditional keyword grants (`getConditionalKeywordGrants`) | `conditional_keyword`, `datasheet`, `keyword`, `detachment`, `miniature`, `allegiance_ability`, `faction_keyword` — including allegiance- and roster-keyword-gated rows, resolved in the Army Builder once an allegiance is declared |
@@ -220,9 +223,11 @@ carry both a parent and child faction keyword.
 
 Regenerate this list anytime with `comm -23 <(sqlite3 public/40k.sqlite '.tables' | tr -s ' ' '\n' | sort) <(grep -oE '\b[a-z_][a-z0-9_]*\b' src/utils/db.ts | sort -u)` —
 it diffs every table name in the live schema against every identifier `db.ts`
-actually references. As of this writing, 61 of the DB's 145 tables are untouched
-(`detachment_force_disposition` and `force_disposition` are now queried — see
-[Force dispositions](#force-dispositions-detachment_force_disposition)).
+actually references. As of this writing, 58 of the DB's 145 tables are untouched
+(`detachment_force_disposition`/`force_disposition` and `enhancement_bodyguard_group`
+`(_datasheet/_keyword)` are now queried — see
+[Force dispositions](#force-dispositions-detachment_force_disposition) and
+`getDetachmentsByFaction` above).
 Most are **not** scorekeeping/match-tracking — they're content-integration gaps in
 areas the app already partially covers:
 
@@ -234,9 +239,10 @@ areas the app already partially covers:
   `secondary_objective`, `objective`, `force_disposition_mission(_recommended_preset)`, `battle`,
   `battle_player(_detachment/_secondary_mission/_turn*)`.
 - **Enhancement eligibility edge cases** (which units/detachments can take which
-  enhancement, beyond what `getDetachmentsByFaction` already resolves):
-  `enhancement_bodyguard_group(_datasheet/_keyword)`, `enhancement_datasheet_ability`,
-  `enhancement_keyword_points_cost`, `enhancement_required_keyword_group_faction_keyword`,
+  enhancement, beyond what `getDetachmentsByFaction` already resolves —
+  `enhancement_bodyguard_group(_datasheet/_keyword)` is now queried, see above):
+  `enhancement_datasheet_ability`, `enhancement_keyword_points_cost`,
+  `enhancement_required_keyword_group_faction_keyword`,
   `enhancement_required_wargear_item`, `enhancement_wargear_item_profile`.
 - **Allied-faction edge cases** beyond what `getAlliedUnitsForFaction`/`getAlliedLimitsForFaction`
   cover: the `allied_faction` base table itself (only its child join tables are

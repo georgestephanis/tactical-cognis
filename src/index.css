@@ -2224,3 +2224,73 @@ code {
   line-height: 1.5;
   color: var(--text-secondary);
 }
+
+/* Detachment hovercard — CSS-only hover/focus reveal on a selected-detachment chip,
+   detailing the dispositions/enhancements/stratagems it grants. */
+.detachment-chip {
+  position: relative;
+}
+
+.detachment-hovercard {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1200;
+  width: 360px;
+  max-width: 80vw;
+  max-height: 420px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  box-shadow: var(--shadow-lg);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-align: left;
+  white-space: normal;
+  cursor: default;
+}
+
+.detachment-chip:hover .detachment-hovercard,
+.detachment-chip:focus-within .detachment-hovercard {
+  display: block;
+}
+
+.detachment-hovercard-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.detachment-hovercard-section + .detachment-hovercard-section {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--glass-border);
+}
+
+.detachment-hovercard-section-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  color: var(--accent-gold);
+  margin-bottom: 0.35rem;
+}
+
+.detachment-hovercard-item + .detachment-hovercard-item {
+  margin-top: 0.5rem;
+}
+
+.detachment-hovercard-item-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.detachment-hovercard-item-meta {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}

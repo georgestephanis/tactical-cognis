@@ -328,6 +328,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
           isIncludedInEnhancementLimit: e.isIncludedInEnhancementLimit,
           requiredKeywordGroups: e.requiredKeywordGroups,
           excludedKeywords: e.excludedKeywords,
+          grantsLeadership: e.grantsLeadership,
         })),
         stratagems: appDet.stratagems || [],
         restrictions: appDet.restrictions || [],
