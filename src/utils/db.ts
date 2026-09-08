@@ -850,6 +850,35 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
     console.warn("Could not fetch excluded keywords for enhancements:", err);
   }
 
+  // Fetch enhancement-granted leadership (`enhancement_bodyguard_group*`) — lets an
+  // enhancement's wearer additionally lead/support a squad on top of their intrinsic
+  // `leads` list (e.g. Kaptin's Hat → Flash Gitz). Guarded: older DBs lack the table.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let enhancementBodyguardGrants: any[] = [];
+  try {
+    const byDatasheet = await query(`
+      SELECT ebg.enhancementId, ebg.bodyguardType, d.name AS targetName
+      FROM enhancement_bodyguard_group ebg
+      JOIN enhancement_bodyguard_group_datasheet ebgd ON ebgd.enhancementBodyguardGroupId = ebg.id
+      JOIN datasheet d ON d.id = ebgd.datasheetId
+      WHERE ebg.enhancementId IN (
+        SELECT id FROM enhancement WHERE detachmentId IN (${detIds})
+      )
+    `);
+    const byKeyword = await query(`
+      SELECT ebg.enhancementId, ebg.bodyguardType, k.name AS targetName
+      FROM enhancement_bodyguard_group ebg
+      JOIN enhancement_bodyguard_group_keyword ebgk ON ebgk.enhancementBodyguardGroupId = ebg.id
+      JOIN keyword k ON k.id = ebgk.keywordId
+      WHERE ebg.enhancementId IN (
+        SELECT id FROM enhancement WHERE detachmentId IN (${detIds})
+      )
+    `);
+    enhancementBodyguardGrants = [...byDatasheet, ...byKeyword];
+  } catch (err) {
+    console.warn('Skipping enhancement-granted leadership (table missing):', err);
+  }
+
   // Fetch stratagems
   const stratagems = await query(`
     SELECT id, detachmentId, name, lore, whenRules as "when", targetRules as "target", effectRules as "effect", restrictionRules as "restrictions", cpCost, key, category
@@ -902,6 +931,10 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
 
         const exclKws = excludedKeywords.filter(ek => ek.enhancementId === e.id).map(ek => String(ek.keywordName));
 
+        const grantsLeadership = enhancementBodyguardGrants
+          .filter(g => g.enhancementId === e.id)
+          .map(g => ({ targetName: String(g.targetName), bodyguardType: String(g.bodyguardType) }));
+
         return {
           ...e,
           pointsCost: Number(e.pointsCost) || 0,
@@ -912,6 +945,7 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
           isIncludedInEnhancementLimit: e.isIncludedInEnhancementLimit !== undefined ? !!e.isIncludedInEnhancementLimit : true,
           requiredKeywordGroups,
           excludedKeywords: exclKws,
+          grantsLeadership,
         };
       }),
       stratagems: stratagems.filter(s => s.detachmentId === det.id),

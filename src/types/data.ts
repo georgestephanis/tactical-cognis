@@ -184,6 +184,12 @@ export interface AppEnhancement {
   isIncludedInEnhancementLimit?: boolean;
   requiredKeywordGroups?: string[][];
   excludedKeywords?: string[];
+  /**
+   * Units (by name) or keywords this enhancement additionally lets its wearer
+   * lead/support, on top of the wearer's intrinsic `leads` list
+   * (`enhancement_bodyguard_group*`, e.g. Kaptin's Hat → Flash Gitz).
+   */
+  grantsLeadership?: { targetName: string; bodyguardType: string }[];
 }
 
 export interface AppStratagem {

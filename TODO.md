@@ -28,7 +28,7 @@ even once wired up, no matter how sound the schema link is.
 
 | # | Item | Payoff | Effort | Live rows |
 |---|------|--------|--------|-----------|
-| 2 | Enhancement legality gaps | High | Small | 650 + 21 |
+| 2 | Enhancement faction-sub-keyword legality gap | High | Small | 650 |
 | 3 | Stratagem phase tags | Medium-High | Small | 2,016 |
 | 4 | Detachment "why take this" bullets | Medium | Small | 55 / 64 |
 | 5 | Detachment linked/bundled datasheets | Medium-High | Small–Medium | 107 |
@@ -38,11 +38,12 @@ even once wired up, no matter how sound the schema link is.
 | 9 | `wargear_option_group` instruction text | Unknown — needs a scoping spike | ? | 3,037 |
 | — | Near-empty tables (defer) | Low | — | 0–2 each |
 
-#### 2. Enhancement legality gaps
+#### 2. Enhancement faction-sub-keyword legality gap
 **Effort: Small | Payoff: High**
-* **Tables:** `enhancement_required_keyword_group_faction_keyword` (650 rows), `enhancement_bodyguard_group` + `enhancement_bodyguard_group_datasheet` (21 rows each)
-* **Objective:** Close a real roster-legality hole — some enhancements are scoped to a specific faction sub-keyword or restricted to a named "bodyguard" datasheet, and the builder currently doesn't check either.
-* **Scope:** Extend the existing enhancement-eligibility resolver (which already handles `enhancement_required_keyword_group`/`_keyword`, see Completed below) with these two additional gates. Same shape as work already done — lowest-risk, highest-value item on this list.
+* **Tables:** `enhancement_required_keyword_group_faction_keyword` (650 rows)
+* **Objective:** Close a real roster-legality hole — some enhancements are scoped to a specific declared faction sub-keyword (e.g. a Space Marine Chapter or Chaos Mark), and the builder currently doesn't check it.
+* **Scope:** Extend the existing enhancement-eligibility resolver (which already handles `enhancement_required_keyword_group`/`_keyword`, see Completed below) with this additional gate.
+* **Note:** the `enhancement_bodyguard_group` half of this item (22 rows) turned out to be a *different* mechanism than "restricted to a named bodyguard datasheet" — see 2026-09-08 in Completed below.
 
 #### 3. Stratagem phase tags
 **Effort: Small | Payoff: Medium-High**
@@ -105,6 +106,10 @@ valuable — worth another look if a concrete use case comes up, not roadmapped 
 ---
 
 ## Completed Database Integrations
+
+### 2026-09-08 — Detachment info hovercard + enhancement-granted leadership
+* **Detachment dropdown + hovercard** ✅ The Army Builder's "Add Detachment" `<select>` now appends each detachment's force disposition(s) to the option label, and each selected-detachment chip carries a hover/focus card (`DetachmentHovercard.tsx`, CSS-only reveal in `index.css`) listing its dispositions, enhancements, stratagems, and detachment rules — reusing the existing `RulesText` renderer for rule prose. Pure UI; no new queries needed, since `MergedDetachment` already carried all of this data.
+* **`enhancement_bodyguard_group` + `_datasheet` + `_keyword`** ✅ Previously entirely unqueried (flagged in item 2 below under the wrong hypothesis — "restricted to a named bodyguard datasheet"). Investigating a user report that Ork's *Kaptin's Hat* should let its wearer lead Flash Gitz confirmed the real mechanic: this table mirrors `datasheet_bodyguard_group` (the table that already powers `Datasheet.leads`) but scoped to an equipped enhancement instead of being intrinsic to the datasheet — i.e. some enhancements *grant* their wearer the ability to lead/support a squad they otherwise couldn't. 22 rows locally, spanning Orks, Astra Militarum, Thousand Sons, World Eaters, Adepta Sororitas, Necrons (Murdermind → *support*, not *leader*), Chaos Space Marines, and Space Wolves. Wired into `db.ts` (`getDetachmentsByFaction` → `AppEnhancement.grantsLeadership`), `dataMapper.ts`, and `ArmyBuilder.tsx`'s `checkCompatibility`/`canAttachCharacterToSquad` (also correctly classifies enhancement-granted *support* attachments, not just *leader*, so they don't consume the leader slot). Verified against the live DB that Kaptin's Hat → Flash Gitz (`leader`) round-trips correctly.
 
 ### 11th edition / Legends support (data version 946)
 * **`datasheet.isLegends`** ✅ New column shipped with `Codex: Orks`, the first 11th-edition book. All 12 flagged rows live in the `Legends: Orks` publication and carry normal faction keywords and points, so they previously appeared as ordinary codex units. Now surfaced through `getUnitsByFaction`/`getAlliedUnitsForFaction` onto `MergedUnit.isLegends`: hidden by default behind an "Include Legends" toggle in both the Faction Browser and the Army Builder catalogue, badged where shown, excluded from Deep Analysis transport/embark lists, and raised as a matched-play roster validation error if one is in the list.
