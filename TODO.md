@@ -18,74 +18,16 @@ reads now lives in the coverage table in [DB.md](./DB.md).
   - Secondary objective selection/drawing (Tactical vs. Fixed cards).
   - Interactive turn-by-turn Victory Point (VP) tracker during a match.
 
-### Content-integration gaps — priority matrix
+### Content-integration gaps
 
-Everything below is content-integration debt, not the missions/scoring cluster
-above — see [DB.md](./DB.md)'s "Unused tables" section for how these were found
-and grouped. Row counts are from the local companion-app export and are the main
-signal behind each Payoff rating: a table with 0-2 live rows has nothing to show
-even once wired up, no matter how sound the schema link is.
+Items 2-9 (the whole priority matrix from the previous audit) shipped 2026-09-08 —
+see Completed below for what each turned into. One follow-up remains:
 
-| # | Item | Payoff | Effort | Live rows |
-|---|------|--------|--------|-----------|
-| 2 | Enhancement faction-sub-keyword legality gap | High | Small | 650 |
-| 3 | Stratagem phase tags | Medium-High | Small | 2,016 |
-| 4 | Detachment "why take this" bullets | Medium | Small | 55 / 64 |
-| 5 | Detachment linked/bundled datasheets | Medium-High | Small–Medium | 107 |
-| 6 | Datasheet sub-abilities | Medium | Medium | 52 |
-| 7 | Allied-faction slot/parent-keyword edge cases | Medium | Medium | 25 + 42 |
-| 8 | All-model wargear "apply to whole unit" shortcut | Medium | Medium-Large | 65 / 29 / 71 |
-| 9 | `wargear_option_group` instruction text | Unknown — needs a scoping spike | ? | 3,037 |
-| — | Near-empty tables (defer) | Low | — | 0–2 each |
-
-#### 2. Enhancement faction-sub-keyword legality gap
-**Effort: Small | Payoff: High**
-* **Tables:** `enhancement_required_keyword_group_faction_keyword` (650 rows)
-* **Objective:** Close a real roster-legality hole — some enhancements are scoped to a specific declared faction sub-keyword (e.g. a Space Marine Chapter or Chaos Mark), and the builder currently doesn't check it.
-* **Scope:** Extend the existing enhancement-eligibility resolver (which already handles `enhancement_required_keyword_group`/`_keyword`, see Completed below) with this additional gate.
-* **Note:** the `enhancement_bodyguard_group` half of this item (22 rows) turned out to be a *different* mechanism than "restricted to a named bodyguard datasheet" — see 2026-09-08 in Completed below.
-
-#### 3. Stratagem phase tags
-**Effort: Small | Payoff: Medium-High**
-* **Tables:** `stratagem_phase` (2,016 rows — full coverage, every stratagem)
-* **Objective:** Show which phase(s) a stratagem can be used in (e.g. "Fight phase") as a badge in **Faction Browser**'s stratagem list.
-* **Scope:** One join query, one badge/tag added to the existing stratagem card render. Pure display, no legality logic.
-
-#### 4. Detachment "why take this" bullets
-**Effort: Small | Payoff: Medium**
-* **Tables:** `detachment_detail` (55 rows), `detachment_detail_bullet_point` (64 rows)
-* **Objective:** Surface the companion app's short "why take this detachment" bullet list in the detachment picker — flavor/decision-support content, same shape as the Core Rules `bullets` handling just added.
-* **Scope:** Query + render as a small bullet list under each detachment in **Faction Browser**.
-
-#### 5. Detachment linked/bundled datasheets
-**Effort: Small–Medium | Payoff: Medium-High**
-* **Tables:** `detachment_linked_datasheet` (107 rows — `count`, `isWarlord` columns)
-* **Objective:** Some detachments come bundled with a specific unit (sometimes as Warlord). Currently invisible to roster validation.
-* **Scope:** Display-only pass first (show the linked unit(s) on the detachment card) is a quick win; validating/auto-including them in the builder is a follow-up once the display step confirms the data reads cleanly. `detachment_required_datasheet` (0 rows locally) rides along for free if wired the same way, but has nothing to show yet.
-
-#### 6. Datasheet sub-abilities
-**Effort: Medium | Payoff: Medium**
-* **Tables:** `datasheet_sub_ability` (52 rows, `name`/`rules` nested under a `datasheet_ability`)
-* **Objective:** Some abilities currently rendered in **Unit Details**/**Faction Browser** may be missing nested sub-effects that live in this table.
-* **Scope:** Fetch alongside `datasheet_ability` and nest under the parent ability wherever it's already rendered — touches a few render sites, so more integration surface than items 2-4.
-
-#### 7. Allied-faction slot/parent-keyword edge cases
-**Effort: Medium | Payoff: Medium**
-* **Tables:** `allied_faction_parent_faction_keyword` (25 rows), `allied_faction_keyword_slotless_keyword_group` + `_donor_keyword` + `_receiver_keyword` (12/18/12 rows)
-* **Objective:** Narrow but real ally-legality edge cases — e.g. an allied unit counting toward a battlefield-role slot "for free," or a meta-faction parent-keyword resolution the current allied logic doesn't cover.
-* **Scope:** Extend `getAlliedUnitsForFaction`/`getAlliedLimitsForFaction` carefully — needs testing against existing ally rosters to avoid regressing what's already working.
-
-#### 8. All-model wargear "apply to whole unit" shortcut
+#### 8b. Interactive "apply to whole unit" wargear picker
 **Effort: Medium-Large | Payoff: Medium**
-* **Tables:** `all_model_wargear_choice` (65 rows), `all_model_wargear_choice_set` (29 rows), `all_model_wargear_choice_wargear_item` (71 rows)
-* **Objective:** A UX convenience — "give this loadout to every model in the unit" instead of setting each model's wargear individually.
-* **Scope:** New UI affordance in the Army Builder wargear picker, parallel to (not replacing) the existing `loadout_choice*`/`wargear_limit*` system. Real payoff for large-squad UX, but needs new interaction design, not just a data join.
-
-#### 9. `wargear_option_group` instruction text — needs scoping first
-**Effort: Unknown | Payoff: Unknown**
-* **Tables:** `wargear_option_group` (3,037 rows — the single largest unused table)
-* **Objective:** Unclear yet whether this is the authoritative source for wargear-picker instruction text (e.g. "Choose one of the following") that isn't currently shown, or a legacy/parallel structure already superseded by the integrated `loadout_choice*`/`wargear_limit*` system.
-* **Scope:** Before committing effort — diff a few `datasheetId`s against what the builder already resolves via `loadout_choice*` to see whether this table adds new information or just duplicates it.
+* **Tables:** `all_model_wargear_choice(_set/_wargear_item)` (65 / 29 / 71 rows) — already queried and shown as read-only prose (see Completed).
+* **Objective:** The real UX win item 8 was chasing — an actual "give this loadout to every model in the unit" control in the Army Builder wargear picker, instead of setting each model individually.
+* **Scope:** Deliberately deferred from the 2026-09-08 pass: this needs new `RosterUnit` state, print-output changes, and interaction design, not just a data join — the display-only version shipped first is lower-risk and already surfaces the previously-invisible content.
 
 ### Near-empty tables (defer)
 0-2 live rows locally — nothing to show even if wired up. Revisit only if a future
@@ -106,6 +48,20 @@ valuable — worth another look if a concrete use case comes up, not roadmapped 
 ---
 
 ## Completed Database Integrations
+
+### 2026-09-08 — Content-integration gaps batch (former priority-matrix items 2-9)
+All display-only or additive — none change how an existing, already-passing roster
+validates. `enhancement_required_keyword_group_faction_keyword` and the `allied_faction`
+pair below are the two that do change validation outcomes (closing gaps that were
+previously silently unenforced), called out specifically.
+* **#2 Enhancement faction-sub-keyword gate** ✅ `enhancement_required_keyword_group_faction_keyword` (650 rows) folds into the same `AppEnhancement.requiredKeywordGroups` groups as ordinary unit-keyword requirements (confirmed via the DB that a group can mix both, AND-within-group — e.g. *Osseus Key* requires "Watch Master or Techmarine" AND "Adeptus Astartes"). `isUnitEligibleForEnhancement`'s three call sites now also feed the unit's `Datasheet.factionKeywords` into the keyword pool, not just model keywords. **Legality-affecting**: previously an enhancement scoped to a declared sub-faction keyword was unenforced.
+* **#3 Stratagem phase tags** ✅ `stratagem_phase` (2,016 rows, full coverage) → `AppStratagem.phases`, humanized (`chargePhase` → "Charge Phase") and shown as badges on Faction Browser's stratagem cards.
+* **#4 Detachment "why take this" bullets** ✅ `detachment_detail` + `_bullet_point` → `MergedDetachment.details`, rendered in Faction Browser under Detachment Rules and in the Army Builder's `DetachmentHovercard`.
+* **#5 Detachment linked/bundled datasheets** ✅ `detachment_linked_datasheet` → `MergedDetachment.linkedDatasheets`, shown as a "Comes With" list in Faction Browser and the hovercard. `detachment_required_datasheet` rides along guarded but is still 0 rows locally. Display-only, as scoped — auto-including bundled units in the builder roster remains a follow-up if ever wanted.
+* **#6 Datasheet sub-abilities** ✅ `datasheet_sub_ability` (56 of 59 rows actually reachable through a real datasheet — 3 are orphaned in the DB itself) → `Ability.subAbilities`, nested under the parent ability in Unit Details and Faction Browser's print datacard. Fixes abilities like "Relics of the Matriarchs" that previously rendered with no indication of which named relics they actually offer.
+* **#7 Allied-faction edge cases** ✅ Two independent mechanisms: (a) `allied_faction_parent_faction_keyword` labels each allied catalog unit with its source faction name (e.g. "(Adeptus Mechanicus)") in the Army Builder — pure display. (b) `allied_faction_keyword_slotless_keyword_group(_donor_keyword)` — **legality-affecting**: confirmed via the DB that caps like Agents of the Imperium's "Retinue" reference a keyword ("Retinue") that no datasheet ever carries natively, so that cap was silently unenforced; a unit carrying a registered *donor* keyword (e.g. "Inquisitor") now counts toward it. `AlliedLimit.donorKeywords` carries the substitution.
+* **#8 All-model wargear "apply to whole unit"** ⚠️ Partial by design — see item 8b above. `all_model_wargear_choice(_set/_wargear_item)` synthesized into readable prose ("All models in this unit can be equipped with...") and shown in Unit Details; the interactive bulk-apply builder control is deliberately deferred.
+* **#9 `wargear_option_group` scoping spike, resolved** ✅ Confirmed by diffing against `loadout_choice*`/`base_miniature_loadout_wargear_option`: no FK links the two systems, and `instructionText` is the companion app's own human-readable rendering of the *same* rules `loadout_choice*` already resolves structurally (`isStaticWargear` is always false locally, an unreliable signal) — not a separate legality mechanism. Shown as descriptive prose alongside the existing wargear picker in Unit Details, filtered to skip the literal "Default Wargear" placeholder rows.
 
 ### 2026-09-08 — Detachment info hovercard + enhancement-granted leadership
 * **Detachment dropdown + hovercard** ✅ The Army Builder's "Add Detachment" `<select>` now appends each detachment's force disposition(s) to the option label, and each selected-detachment chip carries a hover/focus card (`DetachmentHovercard.tsx`, CSS-only reveal in `index.css`) listing its dispositions, enhancements, stratagems, and detachment rules — reusing the existing `RulesText` renderer for rule prose. Pure UI; no new queries needed, since `MergedDetachment` already carried all of this data.

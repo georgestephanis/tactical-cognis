@@ -5,7 +5,7 @@ import type { MergedDetachment } from '../types/data';
 // what a detachment actually grants (dispositions, enhancements, stratagems, rules)
 // so the player can see what they're adding without leaving the roster screen.
 export default function DetachmentHovercard({ detachment }: { detachment: MergedDetachment }) {
-  const { forceDispositions, enhancements, stratagems, rules } = detachment;
+  const { forceDispositions, enhancements, stratagems, rules, details, linkedDatasheets } = detachment;
 
   return (
     <div className="detachment-hovercard" role="tooltip">
@@ -17,6 +17,30 @@ export default function DetachmentHovercard({ detachment }: { detachment: Merged
             Force Disposition{forceDispositions.length > 1 ? 's' : ''}
           </div>
           {forceDispositions.map(d => <div key={d.id}>{d.name}</div>)}
+        </div>
+      )}
+
+      {linkedDatasheets && linkedDatasheets.length > 0 && (
+        <div className="detachment-hovercard-section">
+          <div className="detachment-hovercard-section-title">Comes With</div>
+          {linkedDatasheets.map((ld, idx) => (
+            <div key={idx}>
+              {ld.count > 1 ? `${ld.count}x ` : ''}{ld.datasheetName}{ld.isWarlord ? ' (Warlord)' : ''}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {details && details.length > 0 && (
+        <div className="detachment-hovercard-section">
+          {details.map(d => (
+            <div className="detachment-hovercard-item" key={d.id}>
+              <div className="detachment-hovercard-item-name">{d.title}</div>
+              <ul style={{ margin: '0.2rem 0 0', paddingLeft: '1.1rem' }}>
+                {d.bullets.map((b, idx) => <li key={idx}><RulesText text={b} /></li>)}
+              </ul>
+            </div>
+          ))}
         </div>
       )}
 

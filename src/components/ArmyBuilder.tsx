@@ -2404,7 +2404,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
           // Check keywords on this unit
           const catalogUnitForEnh = findCatalogUnit(u.unitSlug);
-          const nativeKeywords = catalogUnitForEnh?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+          const nativeKeywords = [
+            ...(catalogUnitForEnh?.appDatasheet?.models.flatMap(m => m.keywords) || []),
+            ...(catalogUnitForEnh?.appDatasheet?.factionKeywords || []),
+          ];
           const keywords = applyKeywordGrants(catalogUnitForEnh?.appDatasheet?.name, nativeKeywords, factionData?.conditionalKeywordGrants, selectedDetachments.map(d => d.name), warlordUnitName, selectedAllegianceAbilityNames, selectedSubfactionKeywords);
           const isChar = keywords.some(k => k.toLowerCase() === 'character');
           const isEpicHero = keywords.some(k => k.toLowerCase() === 'epic hero');
@@ -2529,14 +2532,17 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           const firstModel = catalog?.appDatasheet?.models?.[0];
           const keywords = firstModel?.keywords || [];
 
-          keywords.forEach(kw => {
-            const normKw = kw.trim();
-            factionData.alliedLimits!.forEach(limit => {
-              if (limit.keyword === 'Points') return;
-              if (limit.keyword.toLowerCase() === normKw.toLowerCase()) {
-                keywordCounts[limit.keyword] = (keywordCounts[limit.keyword] || 0) + 1;
-              }
-            });
+          const normUnitKeywords = keywords.map(kw => kw.trim().toLowerCase());
+          factionData.alliedLimits!.forEach(limit => {
+            if (limit.keyword === 'Points') return;
+            // A unit counts toward this limit if it natively carries the limit's own
+            // keyword, OR carries one of its donor keywords (a substitution for caps
+            // — like "Retinue" — that no datasheet carries as a literal keyword).
+            const matchesDirectly = normUnitKeywords.includes(limit.keyword.toLowerCase());
+            const matchesViaDonor = (limit.donorKeywords || []).some(dk => normUnitKeywords.includes(dk.toLowerCase()));
+            if (matchesDirectly || matchesViaDonor) {
+              keywordCounts[limit.keyword] = (keywordCounts[limit.keyword] || 0) + 1;
+            }
           });
         });
 
@@ -3256,6 +3262,11 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         <span style={{ fontSize: '0.75rem', color: 'var(--accent-gold)' }}>{pts} pts</span>
                         {unit.isFactionPack && <span className="badge badge-faction-pack" style={{ fontSize: '0.55rem', padding: '0.05rem 0.2rem', marginLeft: '0.25rem' }}>FP</span>}
                         {unit.isLegends && <span className="badge badge-legends" style={{ fontSize: '0.55rem', padding: '0.05rem 0.2rem', marginLeft: '0.25rem' }} title="Warhammer Legends — not legal in matched play">LEGENDS</span>}
+                        {unit.isAllied && unit.alliedSourceFactionName && (
+                          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginLeft: '0.35rem' }}>
+                            ({unit.alliedSourceFactionName})
+                          </span>
+                        )}
                       </div>
                       <button
                         className="button"
@@ -3910,7 +3921,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     const costOptions = getDatasheetCosts(matchedCatalog?.appDatasheet, factionData.factionKeywordIds || [], selectedDetachmentId, factionData.slug);
 
     // Enhancements are offered from every selected detachment (filtered by eligibility)
-    const nativeKeywords = matchedCatalog?.appDatasheet?.models.flatMap(m => m.keywords) || [];
+    const nativeKeywords = [
+      ...(matchedCatalog?.appDatasheet?.models.flatMap(m => m.keywords) || []),
+      ...(matchedCatalog?.appDatasheet?.factionKeywords || []),
+    ];
     const keywords = applyKeywordGrants(matchedCatalog?.appDatasheet?.name, nativeKeywords, factionData.conditionalKeywordGrants, selectedDetachments.map(d => d.name), roster.find(u => u.isWarlord)?.name, selectedAllegianceAbilityNames, selectedSubfactionKeywords);
     const isEpicHero = keywords.some(k => k.toLowerCase() === 'epic hero');
     const isEffectivelyBattleline = keywords.some(k => k.toLowerCase() === 'battleline');
