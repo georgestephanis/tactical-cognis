@@ -204,6 +204,12 @@ export function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+/** `stratagem_phase.phase` is camelCase (e.g. `chargePhase`) — humanize for display. */
+function humanizePhaseName(phase: string): string {
+  const spaced = phase.replace(/([A-Z])/g, ' $1').trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 /**
  * Parses `wargear_item_profile.hunterProfileKeyword` into a keyword list.
  *
@@ -389,12 +395,28 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
 
   // 6. Fetch abilities
   const abilities = await query(`
-    SELECT dda.datasheetId, da.name, da.abilityType as type, da.isAura, da.isPsychic, da.rules
+    SELECT dda.datasheetId, da.id as abilityId, da.name, da.abilityType as type, da.isAura, da.isPsychic, da.rules
     FROM datasheet_datasheet_ability dda
     JOIN datasheet_ability da ON dda.datasheetAbilityId = da.id
     WHERE dda.datasheetId IN (${dsIds})
     ORDER BY dda.displayOrder
   `);
+
+  // 6a. Fetch nested sub-abilities (e.g. a named relic under a "choose one relic"
+  // parent ability). Guarded: older DBs lack the table.
+  let subAbilities: Record<string, unknown>[] = [];
+  try {
+    subAbilities = await query(`
+      SELECT datasheetAbilityId, name, rules
+      FROM datasheet_sub_ability
+      WHERE datasheetAbilityId IN (SELECT id FROM datasheet_ability WHERE id IN (
+        SELECT datasheetAbilityId FROM datasheet_datasheet_ability WHERE datasheetId IN (${dsIds})
+      ))
+      ORDER BY displayOrder
+    `);
+  } catch (err) {
+    console.warn('Could not fetch datasheet sub-abilities:', err);
+  }
 
   // 6b. Fetch datasheet rules
   const datasheetRules = await query(`
@@ -598,6 +620,70 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
     wargearRulesMap.get(id)!.push(String(wr.rulesText));
   });
 
+  // "Apply to whole unit" wargear shortcuts (`all_model_wargear_choice*`) — options
+  // every model in the unit can take identically, distinct from the per-model
+  // `loadout_choice*` system. Synthesized into readable prose since these tables
+  // carry no rulesText column, one line per choice set. Guarded: older DBs lack it.
+  const allModelWargearMap = new Map<string, string[]>();
+  try {
+    const setRows = await query(`
+      SELECT id, datasheetId FROM all_model_wargear_choice_set WHERE datasheetId IN (${dsIds})
+    `);
+    if (setRows.length > 0) {
+      const setIdList = setRows.map(s => `'${s.id}'`).join(',');
+      const choiceRows = await query(`
+        SELECT amwc.id, amwc.allModelWargearChoiceSetId, wi.name AS wargearItemName
+        FROM all_model_wargear_choice amwc
+        JOIN all_model_wargear_choice_wargear_item amwcwi ON amwcwi.allModelWargearChoiceId = amwc.id
+        JOIN wargear_item wi ON wi.id = amwcwi.wargearItemId
+        WHERE amwc.allModelWargearChoiceSetId IN (${setIdList})
+      `);
+      setRows.forEach(setRow => {
+        const items = choiceRows.filter(c => c.allModelWargearChoiceSetId === setRow.id);
+        const choiceMap = new Map<string, string[]>();
+        items.forEach(c => {
+          const cid = String(c.id);
+          if (!choiceMap.has(cid)) choiceMap.set(cid, []);
+          choiceMap.get(cid)!.push(String(c.wargearItemName));
+        });
+        const choiceLabels = Array.from(choiceMap.values()).map(names => names.join(' and '));
+        if (choiceLabels.length === 0) return;
+        const dsId = String(setRow.datasheetId);
+        if (!allModelWargearMap.has(dsId)) allModelWargearMap.set(dsId, []);
+        allModelWargearMap.get(dsId)!.push(
+          choiceLabels.length > 1
+            ? `All models in this unit can be equipped with one of the following: ${choiceLabels.join(' / ')}.`
+            : `All models in this unit can be equipped with ${choiceLabels[0]}.`
+        );
+      });
+    }
+  } catch (err) {
+    console.warn('Skipping all-model wargear choices (table missing):', err);
+  }
+
+  // Wargear-picker instruction prose (`wargear_option_group.instructionText`) — the
+  // companion app's own human-readable rendering of the same options the existing
+  // `loadout_choice*`/`wargear_limit*` system already resolves structurally. Not a
+  // separate legality mechanism; shown as descriptive text alongside the picker.
+  const wargearInstructionsMap = new Map<string, string[]>();
+  try {
+    const instructionRows = await query(`
+      SELECT datasheetId, instructionText
+      FROM wargear_option_group
+      WHERE datasheetId IN (${dsIds})
+      ORDER BY displayOrder
+    `);
+    instructionRows.forEach(row => {
+      const dsId = String(row.datasheetId);
+      const text = String(row.instructionText).trim();
+      if (!text || text === 'Default Wargear') return;
+      if (!wargearInstructionsMap.has(dsId)) wargearInstructionsMap.set(dsId, []);
+      wargearInstructionsMap.get(dsId)!.push(text);
+    });
+  } catch (err) {
+    console.warn('Skipping wargear option group instructions (table missing):', err);
+  }
+
   const miniMap = new Map();
   miniatures.forEach(m => {
     const kws = miniKeywords.filter(k => k.miniatureId === m.id).map(k => String(k.name));
@@ -616,7 +702,13 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
   const abilityMap = new Map<string, unknown[]>();
   abilities.forEach(a => {
     if (!abilityMap.has(String(a.datasheetId))) abilityMap.set(String(a.datasheetId), []);
-    abilityMap.get(String(a.datasheetId))!.push({ name: a.name, type: a.type, isAura: !!a.isAura, isPsychic: !!a.isPsychic, rules: a.rules });
+    const subs = subAbilities
+      .filter(sa => sa.datasheetAbilityId === a.abilityId)
+      .map(sa => ({ name: String(sa.name), rules: String(sa.rules) }));
+    abilityMap.get(String(a.datasheetId))!.push({
+      name: a.name, type: a.type, isAura: !!a.isAura, isPsychic: !!a.isPsychic, rules: a.rules,
+      ...(subs.length > 0 ? { subAbilities: subs } : {}),
+    });
   });
 
   const rulesMap = new Map<string, unknown[]>();
@@ -654,6 +746,8 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
     limitedWargearChoiceSets: limitedSetsMap.get(String(ds.id)) || [],
     wargearLimits: limitsMap.get(String(ds.id)) || [],
     wargearRules: wargearRulesMap.get(String(ds.id)) || [],
+    allModelWargearOptions: allModelWargearMap.get(String(ds.id)) || [],
+    wargearInstructions: wargearInstructionsMap.get(String(ds.id)) || [],
   }));
 }
 
@@ -673,7 +767,7 @@ export const getAlliedUnitsForFaction = async (
 
   // Fetch all allowed datasheets for these allied factions, along with any required detachments
   const alliedDatasheets = await query(`
-    SELECT DISTINCT afd.datasheetId, afrd.detachmentId
+    SELECT DISTINCT afd.datasheetId, afd.alliedFactionId, afrd.detachmentId
     FROM allied_faction_datasheet afd
     LEFT JOIN allied_faction_required_detachment afrd ON afd.alliedFactionId = afrd.alliedFactionId
     WHERE afd.alliedFactionId IN (${afIds})
@@ -682,13 +776,31 @@ export const getAlliedUnitsForFaction = async (
 
   // Group by datasheetId to collect required detachment IDs
   const dsDetMap = new Map<string, string[]>();
+  const dsAlliedFactionMap = new Map<string, string>();
   alliedDatasheets.forEach(ad => {
     const dsId = String(ad.datasheetId);
     if (!dsDetMap.has(dsId)) dsDetMap.set(dsId, []);
     if (ad.detachmentId) {
       dsDetMap.get(dsId)!.push(String(ad.detachmentId));
     }
+    if (ad.alliedFactionId) dsAlliedFactionMap.set(dsId, String(ad.alliedFactionId));
   });
+
+  // Resolve each allied faction's own "parent" faction keyword, for display —
+  // e.g. labeling an allied unit "from Adeptus Mechanicus" in the builder catalog
+  // (`allied_faction_parent_faction_keyword`). Guarded: older DBs lack the table.
+  let alliedFactionNames = new Map<string, string>();
+  try {
+    const parentKeywords = await query(`
+      SELECT afpfk.alliedFactionId, fk.name
+      FROM allied_faction_parent_faction_keyword afpfk
+      JOIN faction_keyword fk ON fk.id = afpfk.factionKeywordId
+      WHERE afpfk.alliedFactionId IN (${afIds})
+    `);
+    alliedFactionNames = new Map(parentKeywords.map(pk => [String(pk.alliedFactionId), String(pk.name)]));
+  } catch (err) {
+    console.warn('Could not fetch allied faction parent keywords:', err);
+  }
 
   const dsIdList = Array.from(dsDetMap.keys()).map(id => `'${id}'`).join(',');
 
@@ -706,10 +818,15 @@ export const getAlliedUnitsForFaction = async (
   if (datasheets.length === 0) return [];
   const assembled = await assembleDatasheets(datasheets);
 
-  return assembled.map(ds => ({
-    ...ds,
-    requiredDetachmentIds: dsDetMap.get(String(ds.id)) || [],
-  }));
+  return assembled.map(ds => {
+    const alliedFactionId = dsAlliedFactionMap.get(String(ds.id));
+    const sourceFactionName = alliedFactionId ? alliedFactionNames.get(alliedFactionId) : undefined;
+    return {
+      ...ds,
+      requiredDetachmentIds: dsDetMap.get(String(ds.id)) || [],
+      ...(sourceFactionName ? { sourceFactionName } : {}),
+    };
+  });
 };
 
 /**
@@ -724,7 +841,7 @@ export const getAlliedLimitsForFaction = async (factionSlug: string): Promise<Re
   const afList = alliedFactions.map(af => `'${af.alliedFactionId}'`).join(',');
 
   const keywordLimits = await query(`
-    SELECT afk.alliedFactionId, k.name AS keyword, afk.limitCount, bs.name AS battleSize
+    SELECT afk.id, afk.alliedFactionId, k.name AS keyword, afk.limitCount, bs.name AS battleSize
     FROM allied_faction_keyword afk
     JOIN keyword k ON afk.keywordId = k.id
     LEFT JOIN battle_size bs ON afk.battleSizeId = bs.id
@@ -738,7 +855,34 @@ export const getAlliedLimitsForFaction = async (factionSlug: string): Promise<Re
     WHERE afpl.alliedFactionId IN (${afList})
   `);
 
-  return [...keywordLimits, ...pointsLimits];
+  // A "slotless keyword group" lets a unit carrying a DONOR keyword (e.g. "Inquisitor")
+  // count toward a keyword limit whose name never appears as a native unit keyword
+  // (e.g. the "Retinue" cap on Agents of the Imperium) — without this, such caps
+  // never match anything and are silently unenforced. Guarded: older DBs lack the table.
+  let donorKeywords: Record<string, unknown>[] = [];
+  try {
+    const limitIds = keywordLimits.map(l => `'${l.id}'`).join(',');
+    if (limitIds) {
+      donorKeywords = await query(`
+        SELECT g.alliedFactionKeywordId, dk.name AS donorKeyword
+        FROM allied_faction_keyword_slotless_keyword_group g
+        JOIN allied_faction_keyword_slotless_keyword_group_donor_keyword gd ON gd.alliedFactionKeywordSlotlessKeywordGroupId = g.id
+        JOIN keyword dk ON dk.id = gd.keywordId
+        WHERE g.alliedFactionKeywordId IN (${limitIds})
+      `);
+    }
+  } catch (err) {
+    console.warn('Could not fetch allied slotless-keyword-group donor keywords:', err);
+  }
+
+  const keywordLimitsWithDonors = keywordLimits.map(l => ({
+    ...l,
+    donorKeywords: Array.from(new Set(
+      donorKeywords.filter(dk => dk.alliedFactionKeywordId === l.id).map(dk => String(dk.donorKeyword))
+    )),
+  }));
+
+  return [...keywordLimitsWithDonors, ...pointsLimits];
 };
 
 /**
@@ -832,6 +976,28 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
     console.warn("Could not fetch required keywords for enhancements:", err);
   }
 
+  // Fetch required faction sub-keywords for enhancements (same AND-within/OR-across
+  // group semantics as requiredKeywords above — a group can require a mix of unit
+  // keywords and a faction sub-keyword, e.g. "Character" + "Adeptus Astartes").
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let requiredFactionKeywords: any[] = [];
+  try {
+    requiredFactionKeywords = await query(`
+      SELECT
+        erkg.enhancementId,
+        erkg.id as groupId,
+        fk.name as keywordName
+      FROM enhancement_required_keyword_group erkg
+      JOIN enhancement_required_keyword_group_faction_keyword erkgfk ON erkg.id = erkgfk.enhancementRequiredKeywordGroupId
+      JOIN faction_keyword fk ON erkgfk.factionKeywordId = fk.id
+      WHERE erkg.enhancementId IN (
+        SELECT id FROM enhancement WHERE detachmentId IN (${detIds})
+      )
+    `);
+  } catch (err) {
+    console.warn('Could not fetch required faction keywords for enhancements:', err);
+  }
+
   // Fetch excluded keywords for enhancements
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let excludedKeywords: any[] = [];
@@ -887,6 +1053,55 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
     ORDER BY displayOrder
   `);
 
+  // Fetch datasheets bundled with a detachment (`detachment_linked_datasheet`, e.g. a
+  // Combat-Patrol-style box set) and required datasheets (`detachment_required_datasheet`
+  // — 0 rows in current data, but rides along for free). Display-only for now.
+  let linkedDatasheets: Record<string, unknown>[] = [];
+  try {
+    linkedDatasheets = await query(`
+      SELECT dld.detachmentId, d.name AS datasheetName, dld.count, dld.isWarlord
+      FROM detachment_linked_datasheet dld
+      JOIN datasheet d ON d.id = dld.datasheetId
+      WHERE dld.detachmentId IN (${detIds})
+    `);
+  } catch (err) {
+    console.warn('Could not fetch linked datasheets for detachments:', err);
+  }
+
+  // Fetch "why take this" flavor bullet groups (`detachment_detail*`). Display-only.
+  let detachmentDetails: Record<string, unknown>[] = [];
+  let detachmentDetailBullets: Record<string, unknown>[] = [];
+  try {
+    detachmentDetails = await query(`
+      SELECT id, detachmentId, title
+      FROM detachment_detail
+      WHERE detachmentId IN (${detIds})
+      ORDER BY displayOrder
+    `);
+    detachmentDetailBullets = await query(`
+      SELECT detachmentDetailId, text
+      FROM detachment_detail_bullet_point
+      WHERE detachmentDetailId IN (SELECT id FROM detachment_detail WHERE detachmentId IN (${detIds}))
+      ORDER BY displayOrder
+    `);
+  } catch (err) {
+    console.warn('Could not fetch detachment details:', err);
+  }
+
+  // Fetch which phase(s) each stratagem can be used in (`stratagem_phase`, e.g.
+  // "chargePhase") — display-only, humanized below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let stratagemPhases: any[] = [];
+  try {
+    stratagemPhases = await query(`
+      SELECT stratagemId, phase
+      FROM stratagem_phase
+      WHERE stratagemId IN (SELECT id FROM stratagem WHERE detachmentId IN (${detIds}))
+    `);
+  } catch (err) {
+    console.warn('Could not fetch stratagem phases:', err);
+  }
+
   // Fetch unique keyword restrictions
   const uniqueKeywords = await query(`
     SELECT duk.detachmentId, k.name
@@ -922,8 +1137,9 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
       enhancements: enhancements.filter(e => e.detachmentId === det.id).map(e => {
         // Group required keywords by groupId
         const reqKws = requiredKeywords.filter(rk => rk.enhancementId === e.id);
+        const reqFactionKws = requiredFactionKeywords.filter(rk => rk.enhancementId === e.id);
         const groupsMap = new Map<string, string[]>();
-        reqKws.forEach(rk => {
+        [...reqKws, ...reqFactionKws].forEach(rk => {
           if (!groupsMap.has(rk.groupId)) groupsMap.set(rk.groupId, []);
           groupsMap.get(rk.groupId)!.push(String(rk.keywordName));
         });
@@ -948,11 +1164,32 @@ export const getDetachmentsByFaction = async (factionSlug: string): Promise<Reco
           grantsLeadership,
         };
       }),
-      stratagems: stratagems.filter(s => s.detachmentId === det.id),
+      stratagems: stratagems.filter(s => s.detachmentId === det.id).map(s => ({
+        ...s,
+        phases: stratagemPhases
+          .filter(sp => sp.stratagemId === s.id)
+          .map(sp => humanizePhaseName(String(sp.phase))),
+      })),
       restrictions: restrictions,
       forceDispositions: forceDispositions
         .filter(fd => fd.detachmentId === det.id)
         .map(fd => ({ id: String(fd.id), name: String(fd.name) })),
+      details: detachmentDetails
+        .filter(dd => dd.detachmentId === det.id)
+        .map(dd => ({
+          id: String(dd.id),
+          title: String(dd.title),
+          bullets: detachmentDetailBullets
+            .filter(b => b.detachmentDetailId === dd.id)
+            .map(b => String(b.text)),
+        })),
+      linkedDatasheets: linkedDatasheets
+        .filter(ld => ld.detachmentId === det.id)
+        .map(ld => ({
+          datasheetName: String(ld.datasheetName),
+          count: Number(ld.count) || 1,
+          isWarlord: !!ld.isWarlord,
+        })),
     };
   });
 };

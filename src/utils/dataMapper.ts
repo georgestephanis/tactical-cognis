@@ -14,7 +14,9 @@ import type {
   AllegianceGroup,
   AllegianceAbility,
   ArmyRule,
-  ForceDisposition
+  ForceDisposition,
+  DetachmentDetail,
+  LinkedDatasheet
 } from '../types/data';
 import {
   initDatabase,
@@ -275,6 +277,7 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       isFactionPack: false,
       isAllied: true,
       requiredDetachmentIds: (u as { requiredDetachmentIds?: string[] }).requiredDetachmentIds || [],
+      alliedSourceFactionName: (u as { sourceFactionName?: string }).sourceFactionName,
     });
   });
 
@@ -284,6 +287,9 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
     keyword: String(l.keyword),
     limitCount: Number(l.limitCount),
     battleSize: l.battleSize ? String(l.battleSize) : null,
+    donorKeywords: Array.isArray(l.donorKeywords) && l.donorKeywords.length > 0
+      ? (l.donorKeywords as string[])
+      : undefined,
   }));
 
   const mergedDetachments: MergedDetachment[] = [];
@@ -301,6 +307,8 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
       stratagems: AppStratagem[];
       restrictions: string[];
       forceDispositions?: ForceDisposition[];
+      details?: DetachmentDetail[];
+      linkedDatasheets?: LinkedDatasheet[];
     };
 
     const id = String(appDet.id);
@@ -333,6 +341,8 @@ export async function loadAndMergeFaction(factionSlug: string): Promise<MergedFa
         stratagems: appDet.stratagems || [],
         restrictions: appDet.restrictions || [],
         forceDispositions: appDet.forceDispositions || [],
+        details: appDet.details || [],
+        linkedDatasheets: appDet.linkedDatasheets || [],
       });
     }
   });

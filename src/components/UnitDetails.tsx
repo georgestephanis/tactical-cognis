@@ -391,7 +391,7 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                 </div>
 
                 {/* Wargear Options Section */}
-                {(datasheet.models.some(m => m.wargearChoiceSets && m.wargearChoiceSets.length > 0) || (datasheet.wargearRules && datasheet.wargearRules.length > 0)) && (
+                {(datasheet.models.some(m => m.wargearChoiceSets && m.wargearChoiceSets.length > 0) || (datasheet.wargearRules && datasheet.wargearRules.length > 0) || (datasheet.allModelWargearOptions && datasheet.allModelWargearOptions.length > 0) || (datasheet.wargearInstructions && datasheet.wargearInstructions.length > 0)) && (
                   <div>
                     <div className="datasheet-section-title">Wargear Options</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: 'rgba(0,0,0,0.15)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)', textAlign: 'left' }}>
@@ -401,6 +401,16 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                           {datasheet.wargearRules.map((rule, i) => (
                             <div key={i} style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
                               {rule}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* "Apply to whole unit" shortcuts and the companion app's own wargear-picker instruction prose. */}
+                      {[...(datasheet.allModelWargearOptions || []), ...(datasheet.wargearInstructions || [])].length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          {[...(datasheet.allModelWargearOptions || []), ...(datasheet.wargearInstructions || [])].map((text, i) => (
+                            <div key={i} style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'pre-line', lineHeight: 1.5, fontStyle: 'italic' }}>
+                              {text}
                             </div>
                           ))}
                         </div>
@@ -670,6 +680,18 @@ export const UnitDetails: React.FC<UnitDetailsProps> = ({ unit, onClose }) => {
                       <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-primary)', whiteSpace: 'pre-line' }}>
                         <RulesText text={ab.rules} />
                       </p>
+                      {ab.subAbilities && ab.subAbilities.length > 0 && (
+                        <div style={{ marginTop: '0.6rem', paddingLeft: '0.75rem', borderLeft: '2px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {ab.subAbilities.map((sub, subIdx) => (
+                            <div key={subIdx}>
+                              <strong style={{ color: 'var(--text-primary)', fontSize: '0.85rem' }}>{sub.name}</strong>
+                              <p style={{ margin: '0.15rem 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                <RulesText text={sub.rules} />
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {datasheet.damageProfiles && datasheet.damageProfiles.length > 0 && (

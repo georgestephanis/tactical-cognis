@@ -582,6 +582,41 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                         </div>
                       )}
 
+                      {/* Bundled datasheets (Combat-Patrol-style box sets) */}
+                      {det.linkedDatasheets && det.linkedDatasheets.length > 0 && (
+                        <div style={{ background: 'rgba(0, 242, 254, 0.05)', border: '1px solid rgba(0, 242, 254, 0.15)', padding: '0.75rem 1rem', borderRadius: '8px' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-teal)', textTransform: 'uppercase', display: 'block', marginBottom: '0.25rem' }}>
+                            Comes With:
+                          </span>
+                          <ul style={{ margin: 0, paddingLeft: '1.2rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                            {det.linkedDatasheets.map((ld, idx) => (
+                              <li key={idx}>
+                                {ld.count > 1 ? `${ld.count}x ` : ''}{ld.datasheetName}
+                                {ld.isWarlord ? ' (Warlord)' : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* "Why take this" flavor bullets */}
+                      {det.details && det.details.length > 0 && (
+                        <div style={{ background: 'var(--bg-tertiary)', padding: '1rem 1.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                          {det.details.map((detail) => (
+                            <div key={detail.id}>
+                              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-teal)', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'block', marginBottom: '0.25rem' }}>
+                                {detail.title}
+                              </span>
+                              <ul style={{ margin: 0, paddingLeft: '1.2rem', color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: '1.5' }}>
+                                {detail.bullets.map((bullet, idx) => (
+                                  <li key={idx}><RulesText text={bullet} /></li>
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       {/* Enhancements with points & leader constraints */}
                       {det.enhancements && det.enhancements.length > 0 && (
                         <div>
@@ -683,6 +718,18 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                         {strat.category}
                                       </span>
+                                    )}
+                                    {strat.phases && strat.phases.length > 0 && (
+                                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.3rem' }}>
+                                        {strat.phases.map(phase => (
+                                          <span
+                                            key={phase}
+                                            style={{ fontSize: '0.65rem', color: 'var(--accent-gold)', border: '1px solid var(--accent-gold)', borderRadius: '4px', padding: '0.05rem 0.4rem', textTransform: 'uppercase', letterSpacing: '0.03em' }}
+                                          >
+                                            {phase}
+                                          </span>
+                                        ))}
+                                      </div>
                                     )}
                                   </div>
                                   <span style={{
@@ -1072,6 +1119,15 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
                           <div key={idx} className="print-bw-ability">
                             <span className="print-bw-ability-name">{ab.name} ({ab.type}): </span>
                             <span><RulesText text={ab.rules} /></span>
+                            {ab.subAbilities && ab.subAbilities.length > 0 && (
+                              <span>
+                                {' '}{ab.subAbilities.map((sub, subIdx) => (
+                                  <span key={subIdx}>
+                                    <strong>{sub.name}: </strong><RulesText text={sub.rules} />{subIdx < ab.subAbilities!.length - 1 ? ' ' : ''}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
                           </div>
                         ))}
 

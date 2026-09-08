@@ -112,6 +112,13 @@ export interface AlliedLimit {
   keyword: string;
   limitCount: number;
   battleSize: string | null;
+  /**
+   * A unit carrying any of these keywords counts toward this limit even though it
+   * doesn't natively carry `keyword` itself (`allied_faction_keyword_slotless_keyword_group`
+   * — e.g. Agents of the Imperium's "Retinue" cap, which no datasheet carries as a
+   * literal keyword; an "Inquisitor" unit counts toward it instead).
+   */
+  donorKeywords?: string[];
 }
 
 export interface PointsStep {
@@ -125,6 +132,8 @@ export interface Ability {
   isAura: boolean;
   isPsychic: boolean;
   rules: string;
+  /** Nested named sub-effects (`datasheet_sub_ability`), e.g. individually-named relics under a "choose one" parent ability. */
+  subAbilities?: { name: string; rules: string }[];
 }
 
 export interface DamageProfile {
@@ -162,6 +171,10 @@ export interface Datasheet {
   limitedWargearChoiceSets?: LimitedWargearChoiceSet[];
   /** Plain-text "you may replace X with Y" wargear prose (`wargear_rule.rulesText`), ordered. */
   wargearRules?: string[];
+  /** "Apply to whole unit" wargear options, synthesized to prose (`all_model_wargear_choice*`). */
+  allModelWargearOptions?: string[];
+  /** Companion-app wargear-picker instruction prose (`wargear_option_group.instructionText`), display-only. */
+  wargearInstructions?: string[];
 }
 
 export interface AppDetachmentRule {
@@ -169,6 +182,24 @@ export interface AppDetachmentRule {
   name: string;
   lore: string | null;
   rules: string | null;
+}
+
+/**
+ * A "why take this detachment" flavor bullet group (`detachment_detail` +
+ * `_bullet_point`) — the companion app's own short summary of a detachment's
+ * notable restrictions/keywords/etc., grouped under a title.
+ */
+export interface DetachmentDetail {
+  id: string;
+  title: string;
+  bullets: string[];
+}
+
+/** A datasheet bundled with a detachment (`detachment_linked_datasheet`), e.g. a Combat-Patrol-style box set. */
+export interface LinkedDatasheet {
+  datasheetName: string;
+  count: number;
+  isWarlord: boolean;
 }
 
 export interface AppEnhancement {
@@ -203,6 +234,8 @@ export interface AppStratagem {
   target: string | null;
   effect: string | null;
   restrictions: string | null;
+  /** Phase(s) this stratagem can be used in, humanized (`stratagem_phase`), e.g. "Charge Phase". */
+  phases?: string[];
 }
 
 /** A force disposition offered by a detachment (`force_disposition`). */
@@ -227,6 +260,10 @@ export interface AppDetachment {
    * exactly one; where it offers several the player chooses.
    */
   forceDispositions: ForceDisposition[];
+  /** "Why take this" flavor bullet groups (`detachment_detail*`). Display-only. */
+  details?: DetachmentDetail[];
+  /** Datasheets bundled with this detachment (`detachment_linked_datasheet`). Display-only. */
+  linkedDatasheets?: LinkedDatasheet[];
 }
 
 export interface ConditionalKeywordGrant {
@@ -352,6 +389,10 @@ export interface MergedDetachment {
   restrictions: string[]; // detachment unique-keyword restrictions from the DB
   /** Dispositions offered; more than one means the player must choose. */
   forceDispositions: ForceDisposition[];
+  /** "Why take this" flavor bullet groups (`detachment_detail*`). Display-only. */
+  details: DetachmentDetail[];
+  /** Datasheets bundled with this detachment (`detachment_linked_datasheet`). Display-only. */
+  linkedDatasheets: LinkedDatasheet[];
 }
 
 // Unified mapping structure for the application
@@ -366,6 +407,8 @@ export interface MergedUnit {
   isFactionPack?: boolean;
   isAllied?: boolean;
   requiredDetachmentIds?: string[];
+  /** Source faction of an allied unit, for display (`allied_faction_parent_faction_keyword`), e.g. "Adeptus Mechanicus". */
+  alliedSourceFactionName?: string;
 }
 
 export interface RosterUnit {
