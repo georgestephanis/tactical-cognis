@@ -1550,6 +1550,13 @@ code {
   margin-top: calc(0.25mm * var(--card-scale));
 }
 
+.id1-datacard-damaged {
+  font-size: calc(5.5pt * var(--card-scale));
+  line-height: 1.05;
+  font-style: italic;
+  color: #7c2d12;
+}
+
 /* On the larger card sizes the point is to *see* everything, so undo the
    truncation ID-1 needs to stay within 85.60 x 53.98mm: let the body grow, let
    long keyword and weapon text wrap instead of ellipsing, and stop capping the

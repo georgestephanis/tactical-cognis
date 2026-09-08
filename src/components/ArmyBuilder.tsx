@@ -3833,6 +3833,17 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                       {/* Card Body content */}
                       <div className="id1-datacard-body">
 
+                        {/* Damaged bracket(s) — the standard 10th/11th-ed "reduced
+                            performance at low wounds" penalty. Prose only; the game
+                            doesn't define this as a separate numeric statline. */}
+                        {ds?.damageProfiles && ds.damageProfiles.length > 0 && (
+                          <div className="id1-datacard-damaged">
+                            {ds.damageProfiles.map((dp, i) => (
+                              <div key={i}><strong>{dp.name}:</strong> {dp.rules}</div>
+                            ))}
+                          </div>
+                        )}
+
                         {/* Keywords row */}
                         {firstModel?.keywords?.length ? (
                           <div className="id1-datacard-row">
