@@ -1586,6 +1586,31 @@ code {
   text-overflow: clip;
 }
 
+/* Stratagem cards reuse the .id1-datacard shell (border, page-break-inside
+   avoid, size variants) but get a teal accent bar to read as a different kind
+   of card from unit datacards at a glance, both on screen and on paper. */
+.stratagem-datacard {
+  border-left: calc(1.2mm * var(--card-scale)) solid var(--accent-teal, #00f2fe) !important;
+}
+
+.stratagem-datacard-subhead {
+  font-size: calc(6pt * var(--card-scale));
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: calc(0.5mm * var(--card-scale));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cards-size-half .stratagem-datacard-subhead,
+.cards-size-full .stratagem-datacard-subhead {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .print-bw-roster-header {
   border-bottom: 2px solid #000;
   padding-bottom: 0.5rem;

@@ -22,7 +22,7 @@ import RulesText from './RulesText';
 import DetachmentHovercard from './DetachmentHovercard';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
-import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet, AppEnhancement, ConditionalKeywordGrant } from '../types/data';
+import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet, AppEnhancement, AppStratagem, ConditionalKeywordGrant } from '../types/data';
 
 
 interface ParsedRosterUnit {
@@ -1151,6 +1151,30 @@ function getPrintableCardsRoster(
   });
 
   return result;
+}
+
+interface PrintableStratagem extends AppStratagem {
+  detachmentName: string;
+}
+
+/**
+ * Flattens the stratagems granted by every selected detachment into one
+ * print-friendly list, tagging each with the detachment it comes from.
+ * Detachment order follows selection order; within a detachment, stratagems
+ * keep the DB's own `displayOrder`.
+ */
+function getPrintableStratagems(detachments: MergedDetachment[]): PrintableStratagem[] {
+  return detachments.flatMap(det =>
+    (det.stratagems || []).map(strat => ({ ...strat, detachmentName: det.name }))
+  );
+}
+
+/** "battleTactic" -> "Battle Tactic" */
+function formatStratagemCategory(category: string | null): string {
+  if (!category) return '';
+  return category
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, c => c.toUpperCase());
 }
 
 /**
@@ -3729,9 +3753,59 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                     </>
                   );
                 })()}
+
+                {/* Available Stratagems — every stratagem granted by the selected detachments,
+                    with which detachment it comes from, its CP cost, and when it can be used. */}
+                {(() => {
+                  const stratList = getPrintableStratagems(selectedDetachments);
+                  if (stratList.length === 0) return null;
+
+                  return (
+                    <div className="print-page-break" style={{ marginTop: '2rem' }}>
+                      <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
+                        Available Stratagems
+                      </h3>
+                      <table className="print-bw-skim-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '13%' }}>Detachment</th>
+                            <th style={{ width: '16%' }}>Stratagem</th>
+                            <th style={{ width: '6%', textAlign: 'center' }}>CP</th>
+                            <th style={{ width: '11%' }}>Category</th>
+                            <th style={{ width: '20%' }}>When</th>
+                            <th style={{ width: '34%' }}>Effect</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stratList.map(strat => (
+                            <tr key={strat.id || `${strat.detachmentName}-${strat.name}`}>
+                              <td style={{ fontSize: '8pt', color: '#4b5563' }}>{strat.detachmentName}</td>
+                              <td><strong>{strat.name}</strong></td>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{strat.cpCost || '—'}</td>
+                              <td style={{ fontSize: '8pt' }}>{formatStratagemCategory(strat.category)}</td>
+                              <td style={{ fontSize: '8pt' }}>{strat.when ? <RulesText text={strat.when} /> : '—'}</td>
+                              <td style={{ fontSize: '8pt' }}>
+                                {strat.target && (
+                                  <div><strong>Target:</strong> <RulesText text={strat.target} /></div>
+                                )}
+                                <div>{strat.effect ? <RulesText text={strat.effect} /> : '—'}</div>
+                                {strat.restrictions && (
+                                  <div style={{ fontStyle: 'italic', color: '#4b5563', marginTop: '2px' }}>
+                                    <RulesText text={strat.restrictions} />
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               // 2. Datacards print grid — ID-1 (ISO/IEC 7810), half-width or full-width
+              <>
               <div className={`print-cards-grid cards-size-${cardSize}`}>
                 {(() => {
                   const cardList = getPrintableCardsRoster(roster, factionData, collapseDuplicates);
@@ -3910,6 +3984,62 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 })
               })()}
             </div>
+
+            {/* Stratagem cards — every stratagem granted by the selected detachments,
+                with which detachment it comes from, its CP cost, and when it can be used. */}
+            {(() => {
+              const stratList = getPrintableStratagems(selectedDetachments);
+              if (stratList.length === 0) return null;
+
+              return (
+                <div className="print-page-break" style={{ marginTop: '1.5rem' }}>
+                  <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
+                    Stratagem Cards
+                  </h3>
+                  <div className={`print-cards-grid cards-size-${cardSize}`}>
+                    {stratList.map(strat => (
+                      <div key={strat.id || `${strat.detachmentName}-${strat.name}`} className="id1-datacard stratagem-datacard">
+
+                        <div className="id1-datacard-header">
+                          <div className="id1-datacard-title">{strat.name}</div>
+                          <div className="id1-datacard-points">{strat.cpCost ? `${strat.cpCost}CP` : '—'}</div>
+                        </div>
+
+                        <div className="stratagem-datacard-subhead">
+                          {strat.detachmentName}
+                          {strat.category ? ` · ${formatStratagemCategory(strat.category)}` : ''}
+                        </div>
+
+                        <div className="id1-datacard-body">
+                          {strat.when && (
+                            <div className="id1-datacard-row">
+                              <strong>When:</strong> <RulesText text={strat.when} />
+                            </div>
+                          )}
+                          {strat.target && (
+                            <div className="id1-datacard-row">
+                              <strong>Target:</strong> <RulesText text={strat.target} />
+                            </div>
+                          )}
+                          {strat.effect && (
+                            <div className="id1-datacard-row">
+                              <strong>Effect:</strong> <RulesText text={strat.effect} />
+                            </div>
+                          )}
+                          {strat.restrictions && (
+                            <div className="id1-datacard-row" style={{ fontStyle: 'italic' }}>
+                              <RulesText text={strat.restrictions} />
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            </>
             )}
 
           </div>
