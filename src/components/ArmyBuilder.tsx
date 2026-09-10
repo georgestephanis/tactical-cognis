@@ -3791,7 +3791,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                                 <div>{strat.effect ? <RulesText text={strat.effect} /> : '—'}</div>
                                 {strat.restrictions && (
                                   <div style={{ fontStyle: 'italic', color: '#4b5563', marginTop: '2px' }}>
-                                    {strat.restrictions}
+                                    <RulesText text={strat.restrictions} />
                                   </div>
                                 )}
                               </td>
@@ -4028,7 +4028,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                           )}
                           {strat.restrictions && (
                             <div className="id1-datacard-row" style={{ fontStyle: 'italic' }}>
-                              {strat.restrictions}
+                              <RulesText text={strat.restrictions} />
                             </div>
                           )}
                         </div>
