@@ -1026,7 +1026,8 @@ code {
     visibility: hidden;
   }
 
-  /* Re-show ONLY the print slate subtree.
+  /* Re-show ONLY the print slate subtree (plus the Core Rules doc, which prints
+     in place rather than through a print-slate overlay).
      `visibility` is resolved per element, so a visible descendant inside a
      hidden ancestor prints fine — the ancestors deliberately stay hidden.
      Previously the ancestors themselves were set visible, and because
@@ -1034,7 +1035,9 @@ code {
      not caught by the `display: none` list below printed too (the faction card
      grid, selection glow and all). */
   #print-slate-root,
-  #print-slate-root * {
+  #print-slate-root *,
+  .core-rules-doc,
+  .core-rules-doc * {
     visibility: visible !important;
   }
 
