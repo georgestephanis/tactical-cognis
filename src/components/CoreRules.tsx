@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Sparkles, Printer, BookOpen, FileDown } from 'lucide-react';
+import { Sparkles, Printer, BookOpen, FileDown, FileCode } from 'lucide-react';
 import { initDatabase, getCoreRules, getCoreRulesFaqs } from '../utils/db';
 import type { CoreRuleSection, CoreRuleComponent, CoreRuleFaqEntry } from '../types/data';
 import RulesText from './RulesText';
 import { downloadCoreRulesRtf } from '../utils/rtfExport';
+import { downloadCoreRulesHtml } from '../utils/htmlExport';
 
 function CoreRuleComponentView({ c }: { c: CoreRuleComponent }) {
   switch (c.type) {
@@ -115,6 +116,16 @@ export function CoreRules() {
   const [faqsByContainer, setFaqsByContainer] = useState<Record<string, CoreRuleFaqEntry[]>>({});
   const [loading, setLoading] = useState(true);
   const [includeFaqsInPrint, setIncludeFaqsInPrint] = useState(false);
+  const [exportingRtf, setExportingRtf] = useState(false);
+
+  async function handleDownloadRtf() {
+    setExportingRtf(true);
+    try {
+      await downloadCoreRulesRtf(sections);
+    } finally {
+      setExportingRtf(false);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -186,8 +197,11 @@ export function CoreRules() {
               />
               Include FAQ/Commentary when printing
             </label>
-            <button className="button-outline" onClick={() => downloadCoreRulesRtf(sections)}>
-              <FileDown size={16} /> Download RTF
+            <button className="button-outline" onClick={() => downloadCoreRulesHtml(sections)}>
+              <FileCode size={16} /> Download HTML
+            </button>
+            <button className="button-outline" onClick={handleDownloadRtf} disabled={exportingRtf}>
+              <FileDown size={16} /> {exportingRtf ? 'Fetching images…' : 'Download RTF'}
             </button>
             <button className="button" onClick={() => window.print()}>
               <Printer size={16} /> Print Core Rules
