@@ -1589,6 +1589,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         isWarlord: parsedUnit.isWarlord,
         isFactionPack: matchedUnit.isFactionPack || false,
         selectedCostIndex,
+        compositionIndex: costs[selectedCostIndex]?.compositionIndex,
         enhancementName: validEnhancementName,
         enhancementPoints: enhancementPoints > 0 ? enhancementPoints : undefined,
         selectedWargearChoices,
@@ -1879,7 +1880,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       isCharacter,
       isBattleline,
       isFactionPack: mergedUnit.isFactionPack || false,
-      selectedCostIndex: 0
+      selectedCostIndex: 0,
+      compositionIndex: costs[0]?.compositionIndex
     };
 
     setRoster(prev => [...prev, newUnit]);
@@ -1919,6 +1921,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       return {
         ...u,
         selectedCostIndex: costIndex,
+        compositionIndex: costs[costIndex]?.compositionIndex,
         points,
         modelsCount
       };
@@ -4445,6 +4448,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }).filter(e => isUnitEligibleForEnhancement(keywords, e));
     const hasFactionNonCharEnh = factionData?.detachments?.some(d => d.enhancements?.some(e => e.isEquipableByNonCharacterUnit)) || false;
 
+    // Computed once per card: resolving the loadout is not free and the badge reads it twice.
+    const wargearDelta = getUnitWargearPoints(unit, factionData);
+
     // Leader attach targets (units in roster that are not characters and are compatible)
     const validBodyguards = roster.filter(b => !b.isCharacter);
 
@@ -4481,9 +4487,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   (+{getUnitActualPoints(unit, roster, factionData) - unit.points} duplicate cost)
                 </span>
               )}
-              {getUnitWargearPoints(unit, factionData) !== 0 && (
+              {wargearDelta !== 0 && (
                 <span style={{ fontSize: '0.65rem', color: 'var(--accent-teal)', fontWeight: 600 }}>
-                  ({getUnitWargearPoints(unit, factionData) > 0 ? '+' : ''}{getUnitWargearPoints(unit, factionData)} wargear)
+                  ({wargearDelta > 0 ? '+' : ''}{wargearDelta} wargear)
                 </span>
               )}
             </div>

@@ -439,6 +439,12 @@ export interface RosterUnit {
   isBattleline: boolean;
   isFactionPack: boolean;
   selectedCostIndex: number;
+  /**
+   * Index of the chosen tier's composition in `Datasheet.compositions`. Distinct from
+   * `selectedCostIndex`, which indexes the *filtered* cost list. Absent on units
+   * created before this field existed; model counts then fall back to `selectedCostIndex`.
+   */
+  compositionIndex?: number;
   attachedToId?: string; // ID of target bodyguard squad
   enhancementName?: string;
   enhancementPoints?: number;

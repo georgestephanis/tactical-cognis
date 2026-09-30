@@ -175,4 +175,34 @@ console.log('Testing: tier default surcharge matches the roster baseline');
 }
 console.log('  ✅ PASS');
 
+// --- Filtered tiers must resolve to the right composition ----------------------
+// `selectedCostIndex` indexes the *filtered* cost list, not `Datasheet.compositions`.
+// When an earlier composition is ineligible (here: gated on a detachment we are not
+// running) the two diverge, and reading `compositions[selectedCostIndex]` would size
+// the squad from the wrong tier and misprice its wargear.
+console.log('Testing: model counts follow the composition behind a filtered tier');
+{
+  const gated = datasheet();
+  gated.wargearOptionPoints![SQUADDIE][ITEM_BASIC] = 2;
+  gated.compositions = [
+    { points: 50, requiredDetachmentIds: ['det-other'], models: [{ miniature: 'Boss', min: 1, max: 1 }, { miniature: 'Squaddie', min: 1, max: 1 }] },
+    { points: 100, models: [{ miniature: 'Boss', min: 1, max: 1 }, { miniature: 'Squaddie', min: 5, max: 5 }] },
+  ] as unknown as Datasheet['compositions'];
+
+  const tiers = getDatasheetCosts(gated, [], 'det-mine');
+  assertEq(tiers.length, 1, 'only the ungated composition is eligible');
+  assertEq(tiers[0].compositionIndex, 1, 'tier remembers its position in compositions');
+  assertEq(tiers[0].wargearPoints, 5 * 2, 'surcharge priced from the eligible composition');
+
+  const unit = { selectedCostIndex: 0, compositionIndex: tiers[0].compositionIndex, modelsCount: tiers[0].models, wargearCounts: {} } as unknown as RosterUnit;
+  const counts = getRosterUnitModelCounts(unit, gated);
+  assertEq(counts['Squaddie'], 5, 'squad sized from the right composition');
+  assertEq(getLoadoutWargearPoints(gated, counts, null), tiers[0].wargearPoints, 'baseline matches the tier surcharge');
+
+  // Units saved before `compositionIndex` existed keep the old lookup rather than crashing.
+  const legacy = { selectedCostIndex: 1, modelsCount: 6, wargearCounts: {} } as unknown as RosterUnit;
+  assertEq(getRosterUnitModelCounts(legacy, gated)['Squaddie'], 5, 'legacy units fall back to selectedCostIndex');
+}
+console.log('  ✅ PASS');
+
 console.log('\nAll Wargear Pricing Tests Completed Successfully! 🎉');

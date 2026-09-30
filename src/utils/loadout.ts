@@ -12,7 +12,7 @@ import type { Datasheet, Model, RosterUnit, Weapon } from '../types/data';
  * and scaling models (like standard troops) based on the unit's active composition and current squad size.
  */
 export function getRosterUnitModelCounts(unit: RosterUnit, datasheet: Datasheet): Record<string, number> {
-  const comp = datasheet.compositions[unit.selectedCostIndex];
+  const comp = datasheet.compositions[unit.compositionIndex ?? unit.selectedCostIndex];
   if (!comp || !comp.models) {
     const counts: Record<string, number> = {};
     const firstModelId = datasheet.models[0]?.id;
