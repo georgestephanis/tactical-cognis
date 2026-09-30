@@ -10,8 +10,9 @@
  * Placeholder names and invented prices only — no Games Workshop content
  * (see CLAUDE.md).
  */
-import { getLoadoutWargearPoints, getChoicePoints } from '../src/utils/loadout';
-import type { Datasheet, Model, WargearChoice, WargearChoiceSet } from '../src/types/data';
+import { getLoadoutWargearPoints, getChoicePoints, getRosterUnitModelCounts } from '../src/utils/loadout';
+import { getDatasheetCosts } from '../src/utils/dataMapper';
+import type { Datasheet, Model, RosterUnit, WargearChoice, WargearChoiceSet } from '../src/types/data';
 
 function assert(cond: boolean, msg: string) {
   if (!cond) {
@@ -137,6 +138,71 @@ assertEq(getChoicePoints(ds, SQUADDIE, choice('c', ITEM_FANCY, 'Fancy Gun')), 5,
 assertEq(getChoicePoints(ds, SQUADDIE, choice('c', ITEM_PLAIN, 'Plain Gun')), 0, 'free choice');
 assertEq(getChoicePoints(ds, SQUADDIE, choice('c', ITEM_FANCY, 'Fancy Gun', 2)), 10, 'count is multiplied');
 assertEq(getChoicePoints(unpriced, SQUADDIE, choice('c', ITEM_FANCY, 'Fancy Gun')), 0, 'unpriced datasheet');
+console.log('  ✅ PASS');
+
+// --- Tier price and roster baseline must agree ---------------------------------
+// `getDatasheetCosts` folds the default surcharge into a tier's headline price, and
+// the Army Builder later subtracts a baseline computed from the roster unit's model
+// counts. If the two disagree, every unit with priced default gear drifts by the
+// difference. A roster unit's `modelsCount` is always the tier's model total.
+console.log('Testing: tier default surcharge matches the roster baseline');
+{
+  const tiered = datasheet();
+  tiered.wargearOptionPoints![SQUADDIE][ITEM_BASIC] = 2;
+  tiered.wargearOptionPoints![BOSS][ITEM_BASIC] = 3;
+  tiered.compositions = [
+    { points: 100, models: [{ miniature: 'Boss', min: 1, max: 1 }, { miniature: 'Squaddie', min: 4, max: 4 }] },
+    // A ranged tier: the roster sits at the tier's maximum, which is what is priced.
+    { points: 180, models: [{ miniature: 'Boss', min: 1, max: 1 }, { miniature: 'Squaddie', min: 5, max: 9 }] },
+  ] as unknown as Datasheet['compositions'];
+
+  const tiers = getDatasheetCosts(tiered);
+  assert(tiers.length === 2, 'both tiers priced');
+  assertEq(tiers[0].wargearPoints, 3 + 4 * 2, 'fixed tier default surcharge');
+  assertEq(tiers[1].wargearPoints, 3 + 9 * 2, 'ranged tier is priced at its maximum');
+  assertEq(tiers[1].points, 180 + 21, 'headline price includes the surcharge');
+
+  tiers.forEach((tier, i) => {
+    const rosterUnit = { selectedCostIndex: i, modelsCount: tier.models, wargearCounts: {} } as unknown as RosterUnit;
+    const counts = getRosterUnitModelCounts(rosterUnit, tiered);
+    assertEq(getLoadoutWargearPoints(tiered, counts, null), tier.wargearPoints, `tier ${i} baseline equals folded surcharge`);
+    assertEq(
+      getLoadoutWargearPoints(tiered, counts, {}) - getLoadoutWargearPoints(tiered, counts, null),
+      0,
+      `tier ${i}: an untouched loadout adds nothing on top of the tier price`
+    );
+  });
+}
+console.log('  ✅ PASS');
+
+// --- Filtered tiers must resolve to the right composition ----------------------
+// `selectedCostIndex` indexes the *filtered* cost list, not `Datasheet.compositions`.
+// When an earlier composition is ineligible (here: gated on a detachment we are not
+// running) the two diverge, and reading `compositions[selectedCostIndex]` would size
+// the squad from the wrong tier and misprice its wargear.
+console.log('Testing: model counts follow the composition behind a filtered tier');
+{
+  const gated = datasheet();
+  gated.wargearOptionPoints![SQUADDIE][ITEM_BASIC] = 2;
+  gated.compositions = [
+    { points: 50, requiredDetachmentIds: ['det-other'], models: [{ miniature: 'Boss', min: 1, max: 1 }, { miniature: 'Squaddie', min: 1, max: 1 }] },
+    { points: 100, models: [{ miniature: 'Boss', min: 1, max: 1 }, { miniature: 'Squaddie', min: 5, max: 5 }] },
+  ] as unknown as Datasheet['compositions'];
+
+  const tiers = getDatasheetCosts(gated, [], 'det-mine');
+  assertEq(tiers.length, 1, 'only the ungated composition is eligible');
+  assertEq(tiers[0].compositionIndex, 1, 'tier remembers its position in compositions');
+  assertEq(tiers[0].wargearPoints, 5 * 2, 'surcharge priced from the eligible composition');
+
+  const unit = { selectedCostIndex: 0, compositionIndex: tiers[0].compositionIndex, modelsCount: tiers[0].models, wargearCounts: {} } as unknown as RosterUnit;
+  const counts = getRosterUnitModelCounts(unit, gated);
+  assertEq(counts['Squaddie'], 5, 'squad sized from the right composition');
+  assertEq(getLoadoutWargearPoints(gated, counts, null), tiers[0].wargearPoints, 'baseline matches the tier surcharge');
+
+  // Units saved before `compositionIndex` existed keep the old lookup rather than crashing.
+  const legacy = { selectedCostIndex: 1, modelsCount: 6, wargearCounts: {} } as unknown as RosterUnit;
+  assertEq(getRosterUnitModelCounts(legacy, gated)['Squaddie'], 5, 'legacy units fall back to selectedCostIndex');
+}
 console.log('  ✅ PASS');
 
 console.log('\nAll Wargear Pricing Tests Completed Successfully! 🎉');

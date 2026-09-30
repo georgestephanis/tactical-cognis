@@ -64,6 +64,15 @@ export interface DerivedCost {
   points: number;
   models: number;
   /**
+   * Index of this tier's composition in `Datasheet.compositions`.
+   *
+   * `getDatasheetCosts` filters the compositions down to the eligible, priced
+   * subset, so a tier's position in the returned list is *not* its position in
+   * `compositions`. Anything that needs the composition behind a tier (model
+   * counts for wargear pricing) must use this, never the list index.
+   */
+  compositionIndex: number;
+  /**
    * The default-wargear component already included in `points`.
    *
    * Exposed so the Army Builder can charge only the *delta* between a unit's
@@ -137,6 +146,7 @@ export function getDatasheetCosts(
   return targetCompositions
     .filter(c => c.points != null && Number(c.points) > 0)
     .map(c => {
+      const compositionIndex = ds.compositions.indexOf(c);
       const models = (c.models || []).reduce((sum, m) => sum + (m.max ?? m.min ?? 0), 0);
 
       // 11th edition reintroduced paid wargear, and a unit is priced with the gear
@@ -153,6 +163,7 @@ export function getDatasheetCosts(
         label: models > 0 ? `${models} model${models === 1 ? '' : 's'}` : 'Unit',
         points: Number(c.points) + wargearPoints,
         models,
+        compositionIndex,
         wargearPoints,
       };
     });
