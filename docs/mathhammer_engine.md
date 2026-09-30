@@ -46,12 +46,12 @@ The engine evaluates outcomes sequentially, simulating the Warhammer 40k attack 
 ```mermaid
 graph TD
     A[Raw Attacks BS/WS] -->|Blast modifier| B[Attacks Distribution]
-    B -->|Torrent / Hit roll checks| C[Hit Outpost]
+    B -->|Torrent / Hit roll checks| C[Hit Results]
     C -->|Lethal Hits bypass| D[Wound Roll checks]
     C -->|Normal Hits| D
     D -->|Devastating Wounds bypass| E[Save Checks]
     D -->|Normal Wounds| E
-    E -->|Armor/Invul/Cover| F[Damage Roll Outpost]
+    E -->|Armor/Invul/Cover| F[Damage Roll]
     F -->|Damage Reduct/Halve| G[Feel No Pain checks]
     G -->|Model Overspill Cap| H[Final Casualties & Yield]
 ```
@@ -72,8 +72,9 @@ Calculates expected hits (`expectedHits`) and critical hits (`critHits`):
   - *Snap Shots:* Hard caps hit chance to $1/6$.
   - *Indirect Fire:* Caps hit chance to a maximum of $3/6$ (4+ target).
 - **Re-rolls:**
-  - *Ones:* Re-rolls 1s (probability of $+1/6$).
-  - *All:* Re-rolls all failed values.
+  - *Ones:* adds $P/6$ to the success chance $P$ (hit or wound).
+  - *All:* adds $(1-P)\cdot P$.
+  - Hit re-rolls are denied by `noHitReRolls`, wound re-rolls by `noWoundReRolls`.
 - **Sustained Hits:** Each critical hit (unmodified roll of `critHitThreshold`, or `6` by default) generates $X$ extra hits.
 - **Lethal Hits:** Critical hits skip the wound roll and generate automatic wounds directly.
 
@@ -86,7 +87,8 @@ Compares weapon Strength ($S$) vs target Toughness ($T$):
   - $S < T \implies 5+$
   - $S \le T/2 \implies 6+$
 - **Critical Wounds / Anti-Keywords:** If the target matches `antiKeyword`, unmodified wound rolls of `antiValue` or higher trigger critical wounds.
-- **Twin-Linked:** Allows re-rolling failed wound rolls (either all failures or ones).
+- **Twin-Linked** (or `woundReRoll: 'all'`) re-rolls all failed wound rolls; `woundReRoll: 'ones'` re-rolls 1s.
+- **Wound modifiers:** net `plusToWound − woundPenalty` (the penalty is ignored with `ignoresWoundPenalties`) is capped to $[-1,+1]$, the final target is clamped to $[2,6]$, and `transhuman` raises the target to at least 4+ after modifiers. `critWoundThreshold` (default 6) sets the critical-wound roll when no anti-keyword applies.
 
 ### 4. Saving Throws
 Calculates how many wounds pass through target armor and invulnerable saves:
@@ -101,11 +103,11 @@ Calculates how many wounds pass through target armor and invulnerable saves:
 
 ### 5. Damage Allocation & Feel No Pain (FNP)
 Expected damage is allocated to models. Unused damage on a model does not carry over to the next model (overkill damage is lost):
-- **Damage Modification:** Applied to the damage expression output (first subtracted by `damageReduction` to a minimum of 1, then optionally halved and rounded up).
+- **Damage Modification:** Applied to the damage expression output (Melta is added first, then the damage is optionally halved and rounded up, then `damageReduction` is subtracted to a minimum of 1).
 - **Feel No Pain:** The defender rolls a D6 for each wound allocated. The failure probability is:
   $$P(\text{Fail}) = \frac{\text{fnp} - 1}{6}$$
 - **Casualties Expectation:**
-  Using binomial distribution functions `expectedFlatDamageAfterFnp(damage, modelWounds, fnpFailChance)`, the engine calculates the expected casualties per attack. Excess damage on a single model is capped at that model's remaining wounds ($W$).
+  With no FNP, the expected damage landing per wound is $W / \lceil W/\text{dmg}\rceil$ (overkill is wasted). With FNP, `expectedFlatDamageAfterFnp(damage, modelWounds, fnpFailChance)` applies the reference spreadsheet's cap-and-heuristic logic, and Devastating Wounds and flat mortal wounds use the mortal-wound FNP. Casualties are the effective damage divided by the target's wounds $W$.
 
 ---
 
@@ -161,6 +163,12 @@ The engine has a zero-dependency test suite at [tests/mathhammer.test.ts](../tes
 npm test
 ```
 
-It covers dice-expression parsing and probability distributions, Feel No Pain (binomial), hit/wound modifiers (including Transhuman-style caps), Benefit of Cover, AP and saving-throw logic, Devastating Wounds, and conditional (Hunter) profile selection. Prefer extending this file (or cloning its pattern) when adding math features.
+`npm test` also runs the `rosterPrint`, `loadout` and `missionIntel` suites. The mathhammer suite covers dice-expression parsing and probability distributions, Feel No Pain (binomial), hit/wound modifiers (including Transhuman-style caps), Benefit of Cover, AP and saving-throw logic, Devastating Wounds, and conditional (Hunter) profile selection. Prefer extending this file (or cloning its pattern) when adding math features.
 
 Note that the Hunter-profile tests use obviously-fake placeholder keywords (`BIGTHING`/`SMALLTHING`) rather than real datasheet values, per the repo's no-GW-IP rule.
+
+---
+
+## Outputs & Presets
+
+`MathhammerResult` carries `expectedAttacks`, `expectedHits` (including lethal-hit auto-wounds), `expectedWounds`, `expectedUnsaved`, `rawDamage`, `effectiveDamage`, `casualties`, `lethalWounds` and `devastatingWoundsCount`. `TARGET_PRESETS` defines the standard defenders (GEQ, MEQ, TEQ, VEQ, HEAVY). `selectProfilesForTarget` returns only the first matching Hunter profile.

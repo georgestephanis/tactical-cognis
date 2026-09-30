@@ -73,13 +73,18 @@ Results are memoised per table and the cache is cleared whenever a database is o
 const legendsCol = (await hasColumn('datasheet', 'isLegends')) ? 'd.isLegends' : '0 AS isLegends';
 ```
 
-The three columns currently probed all arrived with the 11th-edition data (data version 946): `datasheet.isLegends`, `publication.isCombatPatrol`, and `wargear_item_profile.hunterProfileKeyword`.
+The four columns currently probed all arrived with the 11th-edition data (data version 946): `datasheet.isLegends`, `publication.isCombatPatrol`, `wargear_item_profile.hunterProfileKeyword`, and `wargear_option.points` (paid wargear; the last is also wrapped in a `try/catch`).
 
-### 4. Conditional weapon profiles (`hunterProfileKeyword`)
+### 4. Paid wargear, mission intel and other readers
+- **Paid wargear:** `assembleDatasheets` reads `wargear_option.points` (the `MAX` per datasheet/miniature/wargear item, non-null miniature only) into `Datasheet.wargearOptionPoints: Record<miniatureId, Record<wargearItemId, points>>`. It is absent on databases predating the column.
+- **Mission intel:** `getDispositionIntel(dispositionId)` and `getSecondaryMissions()` run the SQL and return `null` / `[]` when the tables are missing or a query fails. The pure row-to-result assembly lives in `src/utils/missionIntel.ts` (`assembleDispositionIntel`, `assembleSecondaryMissions`, `getPresetLetter`) so it can be unit-tested without sql.js; it reuses `calculateDeploymentFrequencies` from `rosterPrint.ts`.
+- **Other readers:** `getBattleSizes()`, `getDbStats()`, `getCoreRules()` / `getCoreAbilityGlossary()` / `getCoreRulesFaqs()`, and `initDatabaseFromBuffer()` (the upload path, which also clears the `hasColumn` cache).
+
+### 5. Conditional weapon profiles (`hunterProfileKeyword`)
 
 Most multi-profile weapons offer every profile simultaneously. A **Hunter** profile does not: it is a statline usable *only* against targets carrying specific keywords, paired with a `Standard` profile used against everything else.
 
-`db.ts` exports `parseHunterKeywords()`, which normalises the database's emphasised, slash-separated prose (`**MONSTER/VEHICLE**`) into `['MONSTER', 'VEHICLE']` on `WeaponProfile.hunterKeywords`. Ordinary profiles get `[]`.
+`mathhammer.ts` exports `parseHunterKeywords()` (and `isMalformedHunterKeyword()`, which flags a literal `**null**` marker so `db.ts` can drop the profile), which normalises the database's emphasised, slash-separated prose (`**MONSTER/VEHICLE**`) into `['MONSTER', 'VEHICLE']` on `WeaponProfile.hunterKeywords`. Ordinary profiles get `[]`.
 
 The **decision** logic deliberately lives in the dependency-free engine (`mathhammer.ts`) so it is unit-testable — see [mathhammer_engine.md](./mathhammer_engine.md). Any consumer that aggregates a weapon's output must route through `selectProfilesForTarget()`; summing all profiles of a Hunter weapon roughly doubles its damage.
 
@@ -97,11 +102,13 @@ const factionCache = new Map<string, MergedFaction>();
 If a faction is queried once, subsequent page-state transitions retrieve it instantly.
 
 ### 2. Sizing & Point Resolution
-SQLite stores points cost tiers in `unit_composition` (a text column of points and a display order). The mapper:
+SQLite stores points cost tiers in `unit_composition` (an INTEGER `points` column and a display order). The mapper:
 - Isolates valid points tiers.
 - Sums the maximum limits of miniatures in `unit_composition_miniature` to calculate the exact squad sizes purchaseable by those points.
-- Computes `pointsRange` (`min` and `max` values) to populate UI labels on Faction grids.
+- Computes `pointsRange` (`min` and `max` of the raw composition `points`, **excluding** any wargear surcharge) to populate UI labels on Faction grids.
+- `getDatasheetCosts(ds, factionKeywordIds, detachmentId, factionSlug)` returns the per-tier prices the Army Builder uses: `DerivedCost { label, points, models, compositionIndex, wargearPoints }`. `points` is the composition points **plus** the default loadout's wargear surcharge (11th edition prices every carried item, defaults included); `wargearPoints` is that surcharge on its own; `compositionIndex` is the tier's index in `Datasheet.compositions` — *not* its index in the filtered cost list.
 - Identifies **Combat Patrols** from `publication.isCombatPatrol`, falling back to a `"combat patrol"` publication-name check and then a zero-points check for older databases.
+- Loadout resolution and pricing live in `src/utils/loadout.ts` (pure, tested in `tests/loadout.test.ts`): `getRosterUnitModelCounts`, `getActiveWeapons` / `getUnitActiveWeapons`, `getChoicePoints` (per-model surcharge of one choice) and `getLoadoutWargearPoints` (pass `null` counts to price the default loadout). The Army Builder charges only `actual − default`.
 - Propagates `isLegends` onto `MergedUnit` so Warhammer Legends datasheets can be filtered and flagged (they are hidden by default and are not legal in matched play).
 
 ---
@@ -140,7 +147,8 @@ export interface RosterUnit {
   isCharacter: boolean;
   isBattleline: boolean;
   isFactionPack: boolean;
-  selectedCostIndex: number;
+  selectedCostIndex: number; // index into the *filtered* getDatasheetCosts() list
+  compositionIndex?: number; // index into Datasheet.compositions (used to size the squad for wargear pricing)
   attachedToId?: string; // ID of target bodyguard squad
   enhancementName?: string;
   enhancementPoints?: number;

@@ -19,10 +19,9 @@ graph TD
     LOADED -->|Browse Faction| FB[Faction Browser]
     LOADED -->|Build Force Roster| BUILDER[Army Builder]
     LOADED -->|Mathhammer & Point Stats| ANALYZE[Deep Analysis]
+    LOADED -->|Core Rules Reference| RULES[Core Rules]
     
     FB -->|Click Unit Profile| UD[Unit Details Modal]
-    BUILDER -->|Click Unit Profile| UD
-    ANALYZE -->|Click Unit Profile| UD
 ```
 
 ---
@@ -33,7 +32,7 @@ Click on any view below to read its technical design, style sheets, rendering me
 
 1. **[Database Upload View](./database_upload.md)**
    - *Purpose:* Initial setup screen triggered when the local `40k.sqlite` database is missing. Guides the user to copy their SQLite file or upload one.
-   - *Keys:* HTML5 drag-and-drop, SQL.js wasm initialization, fallback setup guidelines.
+   - *Keys:* HTML5 drag-and-drop, SQL.js wasm initialization, macOS extraction instructions.
 
 2. **[Dashboard (Faction Registry)](./dashboard.md)**
    - *Purpose:* App home screen listing active companion database statistics and all top-level Warhammer 40k factions.
@@ -45,7 +44,7 @@ Click on any view below to read its technical design, style sheets, rendering me
 
 4. **[Unit Details Modal](./unit_details.md)**
    - *Purpose:* Comprehensive unit profile detail overlay. Toggles between the raw Warhammer 40,000 Datasheet layout and a Combat mathhammer simulator.
-   - *Keys:* BS/WS roll calculators, defensive preset comparisons (GEQ, MEQ, TEQ, VEH), wounds/points efficiency matrices.
+   - *Keys:* BS/WS roll calculators, defensive preset comparisons (GEQ, MEQ, TEQ, VEQ, HEAVY), wounds/points efficiency matrices.
 
 5. **[Army Builder](./army_builder.md)**
    - *Purpose:* Roster construction workspace. Select points sizes, add units (including allied units), attach leaders to bodyguards, split Combat Squads, allocate enhancements, and perform rule validation.
@@ -53,14 +52,17 @@ Click on any view below to read its technical design, style sheets, rendering me
 
 6. **[Deep Analysis (Playground & Matrix)](./deep_analysis.md)**
    - *Purpose:* Global sandbox for comparing units across different factions. Includes custom Mathhammer weapons, points efficiency arrays, and troop transport planners.
-   - *Keys:* Transport capacity audits, anti-keyword evaluations, point-efficiency rankings.
+   - *Keys:* Transport capacity audits, per-100-point efficiency rankings (wounds / OC / damage), custom Mathhammer playground.
+
+7. **Core Rules** (`CoreRules.tsx`, `?view=rules`)
+   - *Purpose:* Browse and print the core rules book extracted from the loaded database (`getCoreRules()` in `db.ts`), with FAQ asides. No dedicated storyboard page yet.
 
 ---
 
 ## How Views Inter-Link
 
 - **State synchronization:** The top-level state is owned by [App.tsx](https://github.com/georgestephanis/tactical-cognis/blob/trunk/src/App.tsx). Sub-views invoke callbacks such as `onSelectFaction` or `onSelectUnit` to adjust this state.
-- **Deep Linking:** The URL query parameters `?view=`, `?faction=`, and `?unit=` are parsed dynamically to route the user directly to Factions, specific Units, or analytical workspaces upon page load.
+- **Deep Linking:** The URL query parameters `?view=`, `?faction=`, and `?unit=` are parsed dynamically to route the user directly to Factions, specific Units, or analytical workspaces upon page load. `?view=` accepts `faction`, `builder`, `analysis` and `rules` (anything else shows the dashboard); `?unit=` is only honoured together with `?view=faction&faction=`.
 
 ---
 

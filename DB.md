@@ -26,12 +26,12 @@ prompt. The file lives at `public/40k.sqlite` locally and is gitignored.
 - `metadata` — single row, single column `dataVersion` (an integer that increments with
   app data updates; the app surfaces it in the dashboard).
 - `grdb_migrations` — GRDB's applied-migration ledger (schema version history).
-- **145 tables, ~398 indexes, ~23 triggers** (stable across recent data versions).
+- **147 tables, ~400 indexes, ~23 triggers** (stable across recent data versions).
 - A copy extracted with `sqlite3 ... ".backup"` is fully checkpointed — no `-wal`/`-shm`
   sidecar files.
 
 ```bash
-sqlite3 public/40k.sqlite 'SELECT dataVersion FROM metadata;'   # e.g. 946
+sqlite3 public/40k.sqlite 'SELECT DISTINCT dataVersion FROM metadata;'   # e.g. 963
 sqlite3 public/40k.sqlite '.tables'                             # list all tables
 sqlite3 public/40k.sqlite '.schema datasheet'                   # one table's DDL
 ```
@@ -63,29 +63,29 @@ sqlite3 public/40k.sqlite '.schema datasheet'                   # one table's DD
 
 ## Table map
 
-Approximate row counts from data version 886 — they drift slowly between versions but
+Approximate row counts from data version 963 — they drift slowly between versions but
 the shape doesn't.
 
 ### Datasheets & models — the unit core
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `datasheet` | 1,155 | `id`, `name`, `lore`, `baseSize`, `maxModelCount`, `unitComposition` (prose), `publicationId`, `isFreeFromEntitlements`, **`isLegends`** |
-| `miniature` | 1,569 | statline columns, `datasheetId`, `statlineHidden`, `isSupremeCommander`, `cannotBeWarlord`, `miniatureSlots` |
-| `unit_composition` | 1,516 | `datasheetId`, **`points` (INTEGER)**, `isDefault` — one row per legal size/price tier |
+| `datasheet` | 1,163 | `id`, `name`, `lore`, `baseSize`, `maxModelCount`, `unitComposition` (prose), `publicationId`, `isFreeFromEntitlements`, **`isLegends`** |
+| `miniature` | 1,584 | statline columns, `datasheetId`, `statlineHidden`, `isSupremeCommander`, `cannotBeWarlord`, `miniatureSlots` |
+| `unit_composition` | 1,521 | `datasheetId`, **`points` (INTEGER)**, `isDefault` — one row per legal size/price tier |
 | `unit_composition_miniature` | — | which miniatures (`min`/`max` of each) fill each tier |
 | `datasheet_points_step` | — | `datasheetId`, `stepAt` (model count), `stepPoints` — stepped pricing for block-sold units |
 | `datasheet_damage` | — | bracketed "damaged" statlines for vehicles/monsters |
 | `invulnerable_save` | — | `datasheetId`/`miniatureId`, `save`/`meleeSave`/`rangedSave`, `rules` |
-| `miniature_keyword` ↔ `keyword` (1,239) | — | per-model keywords |
+| `miniature_keyword` ↔ `keyword` (1,169) | — | per-model keywords |
 | `datasheet_faction_keyword` ↔ `faction_keyword` (43) | — | faction keywords a datasheet carries — the practical "what army is this?" link |
 
 ### Wargear & loadouts
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `wargear_item` | 3,516 | `name`, `wargearType`, `ruleText` — names repeat; items are per-datasheet instances |
-| `wargear_item_profile` | 3,246 | `wargearItemId`, `name`, `type` (ranged/melee), `range`, `attacks`, `ballisticSkill`/`weaponSkill`, `strength`, `armourPenetration`, `damage`, **`hunterProfileKeyword`** (conditional profile — see [Hunter profiles](#conditional-hunter-weapon-profiles)) |
+| `wargear_item` | 4,036 | `name`, `wargearType`, `ruleText` — names repeat; items are per-datasheet instances |
+| `wargear_item_profile` | 4,355 | `wargearItemId`, `name`, `type` (ranged/melee), `range`, `attacks`, `ballisticSkill`/`weaponSkill`, `strength`, `armourPenetration`, `damage`, **`hunterProfileKeyword`** (conditional profile — see [Hunter profiles](#conditional-hunter-weapon-profiles)) |
 | `wargear_ability` + `wargear_item_profile_wargear_ability` | — | weapon special rules and their links to profiles |
 | `base_miniature_loadout` / `base_miniature_loadout_wargear_option` | — | baseline gear each miniature starts with |
 | `loadout_choice_set` → `loadout_choice` → `loadout_choice_wargear_item` | — | default loadout + swap options (`limit`, `alternate`) |
@@ -96,7 +96,7 @@ the shape doesn't.
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `datasheet_ability` + `datasheet_datasheet_ability` | 2,025 | `name`, `abilityType` (`core`/`faction`/`datasheet`), `rules`, `isPsychic`/`isAura`, `armyRuleId`, `detachmentRuleId`; the link table carries `restriction` |
+| `datasheet_ability` + `datasheet_datasheet_ability` | 2,269 | `name`, `abilityType` (`core`/`faction`/`datasheet`), `rules`, `isPsychic`/`isAura`, `armyRuleId`, `detachmentRuleId`; the link table carries `restriction` |
 | `datasheet_sub_ability`, `datasheet_rule` | — | nested sub-abilities / per-datasheet rules |
 | `army_rule` + `army_rule_faction_keyword` | — | faction-wide rules, keyword-gated |
 | `allegiance_ability` / `allegiance_ability_group` | — | chapter/legion-style allegiance abilities |
@@ -107,16 +107,16 @@ the shape doesn't.
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `detachment` | 290 | `name`, **`detachmentPointsCost` (INTEGER)** — the base DP cost (1–3), `isCombatPatrol`, `publicationId` |
+| `detachment` | 276 | `name`, **`detachmentPointsCost` (INTEGER)** — the base DP cost (1–3), `isCombatPatrol`, `publicationId` |
 | `detachment_faction_detachment_points_cost` | ~4 | per-faction DP-cost **overrides**: `(detachmentId, factionKeywordId)` composite PK + `detachmentPointsCost`. When a detachment costs different DP for a specific faction, the override wins — `COALESCE(override, base)` |
 | `detachment_rule` | — | `name`, `detachmentId`; rule text hangs off `rule_container_component.detachmentRuleId` |
 | `detachment_faction_keyword` | — | which faction(s) a detachment belongs to |
 | `detachment_unique_keyword` | — | keyword uniqueness restrictions within the detachment |
 | `detachment_detail*`, `detachment_force_disposition`, `detachment_*_datasheet`, `detachment_*_warlord_miniature` | — | flavour bullets, force-disposition link, composition/warlord gating |
-| `enhancement` | 957 | `name`, `rules`, `basePointsCost` (INTEGER), `detachmentId`, `enhancementType`, `cannotBeWarlord` |
+| `enhancement` | 866 | `name`, `rules`, `basePointsCost` (INTEGER), `detachmentId`, `enhancementType`, `cannotBeWarlord` |
 | `enhancement_*` (keyword groups, required wargear) | — | which units may take each enhancement |
 | `enhancement_*` (`bodyguard_group(_datasheet/_keyword)`) | — | which squad(s) an enhancement additionally lets its wearer lead/support, once taken |
-| `stratagem` | 1,432 | `name`, `cpCost` (TEXT), `category` (`battleTactic`/`epicDeed`/`strategicPloy`/…), `whenRules`/`targetRules`/`effectRules`/`restrictionRules`, `key`, `detachmentId` |
+| `stratagem` | 1,290 | `name`, `cpCost` (TEXT), `category` (`battleTactic`/`epicDeed`/`strategicPloy`/…), `whenRules`/`targetRules`/`effectRules`/`restrictionRules`, `key`, `detachmentId` |
 | `stratagem_phase` | — | phases each stratagem can fire in |
 
 ### Leader / bodyguard attachments
@@ -198,6 +198,7 @@ All SQL lives in [`src/utils/db.ts`](./src/utils/db.ts). Coverage today:
 | Feature | Tables touched |
 |---|---|
 | Faction list (`getFactionList`) | `faction_keyword`, `datasheet_faction_keyword`, `detachment_faction_keyword` |
+| Disposition mission intel / secondary deck (`getDispositionIntel`, `getSecondaryMissions`) | `force_disposition`, `force_disposition_mission`, `force_disposition_mission_recommended_preset`, `mission_preset`, `mission_layout`, `mission_deployment`, `primary_mission`, `primary_mission_objective(_scoring)`, `secondary_mission`, `secondary_mission_objective(_scoring)`, `secondary_mission_action` | Army Builder print export (assembled in `utils/missionIntel.ts`) |
 | Units per faction (`getUnitsByFaction`) | `datasheet`, `publication`, `datasheet_faction_keyword`, `miniature`, `miniature_keyword`, `keyword`, `unit_composition(_miniature)`, `datasheet_points_step`, `datasheet_datasheet_ability`, `datasheet_ability`, `datasheet_bodyguard_group(_datasheet/_keyword)`, `datasheet_sub_ability`, `wargear_item`, `wargear_item_profile`, `wargear_item_profile_wargear_ability`, `wargear_ability`, `base_miniature_loadout(_wargear_option)`, `wargear_option`, `loadout_choice_set`, `loadout_choice`, `loadout_choice_wargear_item`, `limited_wargear_choice_set`, `limited_wargear_choice`, `limited_wargear_choice_wargear_item`, `wargear_limit`, `all_model_wargear_choice(_set/_wargear_item)`, `wargear_option_group` |
 | Detachments per faction (`getDetachmentsByFaction`) | `detachment` (+ `detachment_faction_detachment_points_cost` for per-faction DP overrides), `detachment_faction_keyword`, `detachment_rule`, `rule_container_component`, `enhancement` (+ `enhancement_required_keyword_group`, `enhancement_required_keyword_group_keyword`, `enhancement_excluded_keyword`, `enhancement_bodyguard_group`, `enhancement_bodyguard_group_datasheet`, `enhancement_bodyguard_group_keyword`, `enhancement_required_keyword_group_faction_keyword`), `stratagem` (+ `stratagem_phase`), `detachment_unique_keyword`, `detachment_force_disposition`, `force_disposition`, `detachment_detail(_bullet_point)`, `detachment_linked_datasheet` |
 | Army Builder game-size limits (`getBattleSizes`) | `battle_size` |
@@ -223,14 +224,15 @@ carry both a parent and child faction keyword.
 
 Regenerate this list anytime with `comm -23 <(sqlite3 public/40k.sqlite '.tables' | tr -s ' ' '\n' | sort) <(grep -oE '\b[a-z_][a-z0-9_]*\b' src/utils/db.ts | sort -u)` —
 it diffs every table name in the live schema against every identifier `db.ts`
-actually references. As of this writing, 43 of the DB's 145 tables are untouched.
+actually references. As of this writing, 35 of the DB's 147 tables are untouched.
 The 2026-09-08 pass closed the whole former "content-integration gaps" list (see
 [TODO.md](./TODO.md)); what's left splits into three groups:
 
 - **Missions & live battle tracking** (the one cluster that actually is
   scorekeeping — not wired up, and arguably out of scope for a reference/builder
-  app): `mission_pack`, `mission_preset`, `mission_layout(_linked_deployment)`,
-  `mission_deployment`, `mission_twist`, `primary_mission(_action)`,
+  app; the tables read for the print export's mission intel are *not* in this list):
+  `mission_pack`, `mission_layout_linked_deployment`, `mission_twist`,
+  `primary_mission_action`, `*_objective_scorable_period`,
   `secondary_mission_restricted_secondary_mission`,
   `secondary_objective`, `objective`, `battle`,
   `battle_player(_detachment/_secondary_mission/_turn*)`.
@@ -344,8 +346,8 @@ schema and content the earlier 10th-edition data never exercised.
 **`datasheet.isLegends`** (BOOLEAN, default 0) — new column. Marks a
 [Warhammer Legends](https://www.warhammer-community.com/warhammer-legends/)
 datasheet: still playable in open and narrative games, but **not legal in matched
-play**. As of v946 exactly **12 rows** are flagged, all belonging to a single
-`Legends: <faction>` publication. Every other publication is `isLegends = 0`.
+play**. As of v963 **40 rows** are flagged, across two `Legends: <faction>`
+publications (12 and 28). Every other publication is `isLegends = 0`.
 (Run the query below against your own database to see which datasheets those are.)
 
 These datasheets carry the normal `ORKS` faction keyword and real costed
@@ -377,14 +379,15 @@ multi-profile weapon (a combi-weapon, say), where every profile is simultaneousl
 available — so **summing all of a weapon's profiles is wrong here** and roughly
 doubles its output.
 
-As of v946 there are **6 such profiles across 5 weapons**, confined to one codex,
-and every one stores the same value: `**MONSTER/VEHICLE**`. In each case the weapon
+As of v963 there are **9 such profiles across 9 weapons**, and every one stores
+the same value: `**MONSTER/VEHICLE**`. (Three further rows store the literal string
+`**null**` — a dataset export bug for a missing keyword. `isMalformedHunterKeyword()` detects it and those profiles are dropped at load, so the weapon's ordinary profiles carry it.) In each case the weapon
 carries exactly two profiles — one named `Hunter` (gated) and one named `Standard`
 (ungated) — with the Hunter line the stronger of the two against qualifying
 targets. Use the query below to inspect the actual statlines in your own database.
 
 **Value format:** emphasised, slash-separated prose — `**` is markdown emphasis to
-be stripped, and `/` means **OR**. `src/utils/db.ts` exports `parseHunterKeywords()`
+be stripped, and `/` means **OR**. `src/utils/mathhammer.ts` exports `parseHunterKeywords()`
 which normalises `**MONSTER/VEHICLE**` to `['MONSTER', 'VEHICLE']` onto
 `WeaponProfile.hunterKeywords`; an ordinary profile gets `[]`.
 
@@ -420,7 +423,7 @@ loadout, which the companion app materialises as ordinary
 
 That last part is the trap: a datasheet's composition points are a **naked** cost, so
 reading them alone undercharges any unit whose default gear is priced. In the current
-dataset that is ~60 datasheets across most factions — heaviest in Astra Militarum,
+dataset that is ~68 datasheets across most factions — heaviest in Astra Militarum,
 Adeptus Astartes, and T'au Empire.
 
 Consumed by `getLoadoutWargearPoints()` in
@@ -460,7 +463,7 @@ mission presets on top.
 | Table | Rows | Purpose |
 | --- | --- | --- |
 | `force_disposition` | 5 | The five deployment postures (names live in your own database) |
-| `detachment_force_disposition` | 295 | Which disposition(s) a detachment may deploy under |
+| `detachment_force_disposition` | 311 | Which disposition(s) a detachment may deploy under |
 | `force_disposition_mission` | 25 | (friendly × opposition) → primary mission |
 | `force_disposition_mission_recommended_preset` | 75 | Recommended mission presets per pairing |
 
@@ -477,9 +480,9 @@ links a secondary mission to a disposition** — the 18-card deck is the same fo
 so the export prints the whole deck rather than a per-disposition subset.
 
 **The case worth handling:** a detachment usually maps to exactly one disposition,
-but *may offer several for the player to choose between*. As of v946, of 294
-detachments **293 offer exactly one and none offer zero** — a single detachment
-(introduced in the 11th-edition codex) offers a choice between two. That choice is a
+but *may offer several for the player to choose between*. As of v963, of 276
+detachments **241 offer exactly one, 35 offer a choice between several, and none
+offer zero**. That choice is a
 real strategic decision: it swaps the entire row of primary missions the army can
 end up playing, so it cannot be modelled as a single value.
 
@@ -506,11 +509,10 @@ the table degrades to no dispositions rather than failing the detachment load.
   fighting behaviours (2 rows, both under "Special Move Types").
 - Core Rules gained *"21. Flying and Surging"* and a *"Universal Rules Updates"*
   section.
-- The 11th-edition codex adds a new faction-wide `army_rule` row and 16 detachments,
+- The 11th-edition codex adds a new faction-wide `army_rule` row and 15 detachments,
   one of which is its Combat Patrol detachment.
 
-**Data-shape caveat:** `Codex: Orks` datasheets almost entirely lack `lore` — 1 of
-67 Ork rows is populated, versus ~90% (974/1,088) everywhere else. 11 of the 54
+**Data-shape caveat:** `Codex: Orks` datasheets lack `lore` — 0 of 54 are populated, versus ~72% (797/1,109) everywhere else. 11 of the 54
 `Codex: Orks` datasheets also have no `baseSize`. Render these as optional.
 
 ### Handling schema drift

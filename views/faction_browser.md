@@ -22,12 +22,12 @@ Users toggle between four workspace panels:
 - **Bulk print selection:** *Select all shown (N)* adds every unit the filters are currently displaying to the print selection, which is the easy path to a whole faction's reference cards. Because it selects what's *shown*, the **Include Combat Patrol** and **Include Legends** toggles decide whether those units come along — so the same button covers "with" and "without" without needing separate controls. *Print datasheet cards (N)* opens the print slate straight onto the Datasheet Cards layout, and *Clear* empties the selection.
 - **Detachments (`detachments`):** Lists army detachments. Uses an accordion toggle state `expandedDetachment` to show/hide rules, custom stratagem profiles, and enhancement point costs. Each detachment is badged with its force disposition, and a detachment offering a choice of dispositions is badged as such. Expanded content also includes: any datasheets bundled with the detachment ("Comes With", `MergedDetachment.linkedDatasheets`), the companion app's own "why take this" flavor bullets (`MergedDetachment.details`), and each stratagem card is tagged with the phase(s) it can be used in (`AppStratagem.phases`, from `stratagem_phase`).
 - **Faction Rules (`rules`):** Collects and displays army-wide rule modifications by filtering abilities marked with the `'faction'` keyword type across all loaded datasheets.
-- **Yield Analysis (`yield`):** A custom points-efficiency matrix showing mathematical ratios: Wounds per Point (x100) and OC per Point (x100) calculated by dividing total unit counts by average composition prices.
+- **Yield Analysis (`yield`):** A custom points-efficiency matrix showing mathematical ratios: Wounds per Point (x100) and OC per Point (x100) = (stat × average model count across composition tiers) ÷ (average tier cost) × 100. Tier cost comes from `getDatasheetCosts()` and includes the default-wargear surcharge. Top 15 shown; Legends units are tagged.
 
 ### 3. Print Compilation & Layouts
 Users can check cards to select units and open a **Print Preview Modal**:
 - Compiles the selected units into a printable stylesheet layout.
-- Supports two print layouts: **Skim** (compact reference tables) and **Cards** (prints standard ID1 pocket-sized datacards).
+- Supports two print layouts: **Skim** (`print-bw-skim-table`) and **Cards** (black-and-white `.print-bw-datasheet` blocks per unit with stats, abilities and weapon tables). The ID-1 datacard grid belongs to the Army Builder print slate, not this view.
 - Automatically triggers native browser print rules (`@media print`) which hide navigation bars, headers, and footer bars to generate pure black-and-white printouts.
 
 **Print isolation.** The view's root element carries a `.view-root` marker class. In print, everything under `.view-root` is `display: none` except the print slate overlay (`.print-slate-overlay`), and only `#print-slate-root` (and its descendants) is set `visibility: visible`. Previously the whole `.app-container`/`main` ancestor chain was re-shown, which — because `visibility` inherits — also re-showed anything in the underlying view not covered by the hand-maintained `display: none` hide-list (e.g. the faction card grid, including its `.is-selected` glow, printed underneath the Quick Skim table). The `.view-root` marker makes isolation structural instead of enumerated: it covers any current or future view content without needing a new selector added here each time.
@@ -41,8 +41,7 @@ Users can check cards to select units and open a **Print Preview Modal**:
 | `.tab-btn.active` | Highlights the active sub-tab with a gold background (`--accent-gold`) and glow box-shadow. |
 | `.faction-card` | Displays name, publication origin, type tags (character, vehicle, infantry), and a quick-view grid of baseline stats (M, T, Sv, W, OC). |
 | `.card-select-checkbox` | Absolute positioned checkbox in the upper right corner to compile print lists without triggering unit details modals. |
-| `.print-cards-grid` | Arranges printable ID1 datacards into two-column grids matching standard physical formats (85.60mm x 53.98mm). |
-| `.id1-datacard` | Highly structured, high-contrast pocket cards built with compact table stats (6.5pt font size) and weapons text truncation. |
+| `.print-bw-datasheet` | Per-unit black-and-white datasheet block used by the Cards print layout. (`.print-cards-grid` / `.id1-datacard` are Army Builder classes — see [army_builder.md](./army_builder.md).) |
 
 ---
 
@@ -67,3 +66,9 @@ Users can check cards to select units and open a **Print Preview Modal**:
 
 - **[Dashboard](./dashboard.md):** Clicking "Registry" or triggering `onBack` returns the user to the lobby screen.
 - **[Unit Details Modal](./unit_details.md):** Clicking any unit card triggers `onSelectUnit(unit)` which loads the overlay modal.
+
+---
+
+## Notes on displayed points
+
+Unit cards, the print slates and `MergedUnit.pointsRange` show the **base composition cost**. Only the Yield tab uses `getDatasheetCosts()`, whose tier prices also include the 11th-edition default-wargear surcharge, so a unit with paid default gear can show a lower figure on its card than in the Army Builder.

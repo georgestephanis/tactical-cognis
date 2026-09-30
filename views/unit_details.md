@@ -1,6 +1,6 @@
 # Unit Details Modal
 
-The **Unit Details Modal** is a full-screen overlay component that provides deep tactical statistics for a specific unit. It is accessible from multiple views (Faction Browser, Army Builder, and Deep Analysis) and features a view toggle between the standard Warhammer 40k Datasheet and an interactive Mathhammer Combat Simulator.
+The **Unit Details Modal** is a full-screen overlay component that provides deep tactical statistics for a specific unit. It is opened from the Faction Browser (clicking a unit card) and from deep links (`?view=faction&faction=…&unit=…`); `App.tsx` renders it. It opens in Tactical (simulator) mode by default and features a view toggle between the standard Warhammer 40k Datasheet and an interactive Mathhammer Combat Simulator.
 
 ---
 
@@ -30,7 +30,7 @@ When in Simulator mode, the selected weapon profile is run against five standard
 - In the simulator, preset rows the selected profile cannot legally target are greyed out and show *"Profile not usable — requires …"* instead of damage figures, via `profileAppliesToTarget()`.
 
 The simulator runs calculations for:
-- **Expected Attacks:** Adjusts for Blast mechanics vs the target unit size.
+- **Expected Attacks (internal):** Adjusts for Blast mechanics vs the target unit size.
 - **Expected Hits:** Applies skill checks, re-rolls, Torrent auto-hits, and Sustained Hits.
 - **Expected Wounds:** Adjusts for Strength vs Toughness, re-rolls, and Lethal Hits.
 - **Expected Damage:** Applies AP vs Save/Invulnerable Save, Devastating Wounds (ignores armor), and FNP (Feel No Pain) checks.
@@ -69,4 +69,11 @@ The overlay uses high-contrast layouts:
 ## 🔗 Links to Other Views
 
 - **[Faction Browser](./faction_browser.md):** Closes back to the faction registry where the unit card was clicked.
-- **[Army Builder](./army_builder.md):** Closes back to the force roster workspace if opened from a list entry.
+- **[Army Builder](./army_builder.md) / [Deep Analysis](./deep_analysis.md):** Do not open this modal.
+
+---
+
+## Notes on cost and abilities
+
+- The results table shows Avg Hits, Avg Wounds, Casualties and Casualties per 100 pts for each preset, using `unit.pointsRange.min` (base composition cost) as the cost basis. The composition list in datasheet mode uses `getDatasheetCosts()`, which **includes** the 11th-edition default-wargear surcharge, so the two can differ for units with paid default gear.
+- Ability handling is by name match on the profile and weapon names (Torrent, Blast, Lethal Hits, Twin-linked, Devastating Wounds, Sustained Hits). Anti-keyword is always off.
