@@ -9,6 +9,7 @@ import type {
   AppSecondaryMission
 } from '../types/data';
 import { assembleDispositionIntel, assembleSecondaryMissions } from './missionIntel';
+import { parseHunterKeywords, isMalformedHunterKeyword } from './mathhammer';
 
 
 // Handle cases where initSqlJs might be nested in a 'default' property due to Vite/ESM mismatch
@@ -216,23 +217,6 @@ export function slugify(name: string): string {
 function humanizePhaseName(phase: string): string {
   const spaced = phase.replace(/([A-Z])/g, ' $1').trim();
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
-
-/**
- * Parses `wargear_item_profile.hunterProfileKeyword` into a keyword list.
- *
- * The DB stores it as emphasised, slash-separated prose — e.g. the only value
- * present as of data version 946 is `**MONSTER/VEHICLE**`, meaning "applies
- * against a target that is a MONSTER *or* a VEHICLE". Returns `[]` when the
- * profile has no hunter condition (i.e. it is an ordinary profile).
- */
-export function parseHunterKeywords(raw: unknown): string[] {
-  if (raw == null) return [];
-  return String(raw)
-    .replace(/\*/g, '')
-    .split('/')
-    .map(k => k.trim().toUpperCase())
-    .filter(Boolean);
 }
 
 /**
@@ -467,12 +451,16 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
   const hunterCol = (await hasColumn('wargear_item_profile', 'hunterProfileKeyword'))
     ? 'hunterProfileKeyword'
     : `NULL AS hunterProfileKeyword`;
-  const allProfiles = await query(`
+  const allProfileRows = await query(`
     SELECT id, wargearItemId, name, type, range, attacks, ballisticSkill, weaponSkill, strength, armourPenetration, damage,
       ${hunterCol}
     FROM wargear_item_profile
     ORDER BY displayOrder
   `);
+  // A few rows (seen when a new codex landed) store a literal `**null**` marker
+  // instead of a real keyword. Such a profile's condition is unknown, so it is
+  // dropped rather than guessed at — see isMalformedHunterKeyword.
+  const allProfiles = allProfileRows.filter(p => !isMalformedHunterKeyword(p.hunterProfileKeyword));
   const profileAbilities = await query(`
     SELECT wipwa.wargearItemProfileId, wa.name
     FROM wargear_item_profile_wargear_ability wipwa
