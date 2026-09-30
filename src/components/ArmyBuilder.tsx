@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
 import { groupAttachedEntries, getPrintableDetachmentRules, getDeploymentLikelihoodBadge } from '../utils/rosterPrint';
+import { getPresetLetter } from '../utils/missionIntel';
 import { getRosterUnitModelCounts, getUnitActiveWeapons, getLoadoutWargearPoints, getChoicePoints } from '../utils/loadout';
 import type { AttachableEntry, PrintableUnitWrapper } from '../utils/rosterPrint';
 import type { MergedFaction } from '../utils/dataMapper';
@@ -3794,6 +3795,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                 {/* Force Disposition, Terrain & Map Layouts Intel */}
                 {(() => {
                   if (!printIncludeMissionIntel || !dispositionIntel) return null;
+                  const presetLetters = Array.from(new Set(
+                    dispositionIntel.matchups.flatMap(m => m.presets.map((p, idx) => getPresetLetter(p.presetName, p.layoutName, idx)))
+                  )).sort();
 
                   return (
                     <div className="print-page-break" style={{ marginTop: '2rem' }}>
@@ -3801,13 +3805,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         <h3 style={{ textTransform: 'uppercase', margin: 0, fontSize: '1.1rem', color: '#000' }}>
                           Tactical Intel: {dispositionIntel.friendlyDispositionName} (Force Disposition)
                         </h3>
-                        <span style={{ fontSize: '8pt', color: '#4b5563' }}>Chapter Approved 2026-2027</span>
                       </div>
 
                       <p style={{ fontSize: '8pt', color: '#334155', margin: '0 0 1rem 0', lineHeight: 1.4 }}>
-                        In Chapter Approved matched play, crossing your Force Disposition with your opponent’s dictates your Primary Mission
-                        and a subset of 3 recommended Map Layout &amp; Deployment presets (Layouts A, B, C). Out of the 15 total matchups in the pack,
-                        this army participates in 5 pairings (15 presets total).
+                        Crossing your Force Disposition with your opponent’s dictates your Primary Mission and a set of recommended
+                        Map Layout &amp; Deployment presets. This disposition has {dispositionIntel.matchups.length} possible
+                        pairings ({dispositionIntel.totalPresets} recommended presets in total); the odds below assume each
+                        opposing disposition is equally likely.
                       </p>
 
                       {/* Deployment Odds & Likelihood Analysis */}
@@ -3889,54 +3893,38 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                           <tr>
                             <th style={{ width: '18%' }}>Opponent Posture</th>
                             <th style={{ width: '22%' }}>Your Primary Mission</th>
-                            <th style={{ width: '20%' }}>Layout A</th>
-                            <th style={{ width: '20%' }}>Layout B</th>
-                            <th style={{ width: '20%' }}>Layout C</th>
+                            {presetLetters.map(letter => (
+                              <th key={letter} style={{ width: `${Math.floor(60 / presetLetters.length)}%` }}>Layout {letter}</th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {dispositionIntel.matchups.map(m => {
-                            const pA = m.presets[0];
-                            const pB = m.presets[1];
-                            const pC = m.presets[2];
-                            return (
-                              <tr key={m.oppositionDispositionId}>
-                                <td style={{ fontWeight: 600 }}>vs {m.oppositionDispositionName}</td>
-                                <td>
-                                  <strong>{m.primaryMission.name}</strong>
-                                  {m.primaryMission.lore && (
-                                    <div style={{ fontSize: '7.5pt', fontStyle: 'italic', color: '#4b5563', marginTop: '2px' }}>
-                                      {m.primaryMission.lore}
-                                    </div>
-                                  )}
-                                </td>
-                                <td style={{ fontSize: '8pt' }}>
-                                  {pA ? (
-                                    <div>
-                                      <strong>{pA.deploymentName}</strong>
-                                      <div style={{ fontSize: '7pt', color: '#64748b' }}>{pA.presetName}</div>
-                                    </div>
-                                  ) : '—'}
-                                </td>
-                                <td style={{ fontSize: '8pt' }}>
-                                  {pB ? (
-                                    <div>
-                                      <strong>{pB.deploymentName}</strong>
-                                      <div style={{ fontSize: '7pt', color: '#64748b' }}>{pB.presetName}</div>
-                                    </div>
-                                  ) : '—'}
-                                </td>
-                                <td style={{ fontSize: '8pt' }}>
-                                  {pC ? (
-                                    <div>
-                                      <strong>{pC.deploymentName}</strong>
-                                      <div style={{ fontSize: '7pt', color: '#64748b' }}>{pC.presetName}</div>
-                                    </div>
-                                  ) : '—'}
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {dispositionIntel.matchups.map(m => (
+                            <tr key={m.oppositionDispositionId}>
+                              <td style={{ fontWeight: 600 }}>vs {m.oppositionDispositionName}</td>
+                              <td>
+                                <strong>{m.primaryMission.name}</strong>
+                                {m.primaryMission.lore && (
+                                  <div style={{ fontSize: '7.5pt', fontStyle: 'italic', color: '#4b5563', marginTop: '2px' }}>
+                                    {m.primaryMission.lore}
+                                  </div>
+                                )}
+                              </td>
+                              {presetLetters.map(letter => {
+                                const preset = m.presets.find((p, idx) => getPresetLetter(p.presetName, p.layoutName, idx) === letter);
+                                return (
+                                  <td key={letter} style={{ fontSize: '8pt' }}>
+                                    {preset ? (
+                                      <div>
+                                        <strong>{preset.deploymentName}</strong>
+                                        <div style={{ fontSize: '7pt', color: '#64748b' }}>{preset.presetName}</div>
+                                      </div>
+                                    ) : '—'}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
 
@@ -3995,12 +3983,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         <h3 style={{ textTransform: 'uppercase', margin: 0, fontSize: '1.1rem', color: '#000' }}>
                           Chapter Approved Secondary Missions Deck
                         </h3>
-                        <span style={{ fontSize: '8pt', color: '#4b5563' }}>18 Cards (Tactical &amp; Fixed)</span>
+                        <span style={{ fontSize: '8pt', color: '#4b5563' }}>{secondaryMissions.length} Cards (Tactical &amp; Fixed)</span>
                       </div>
 
                       <p style={{ fontSize: '8pt', color: '#334155', margin: '0 0 1rem 0', lineHeight: 1.4 }}>
-                        <em>Note:</em> In Chapter Approved, Force Dispositions determine your Primary Mission and layout subset; Secondary Missions
-                        are drawn from the universal 18-card Secondary deck (or declared secretly as two Fixed Secondaries).
+                        <em>Note:</em> A Force Disposition determines your Primary Mission and layout subset, not your Secondary
+                        Missions. The data links no secondaries to a disposition, so this is the full deck you can draw from
+                        (or declare secretly as Fixed Secondaries).
                       </p>
 
                       <table className="print-bw-skim-table">
@@ -4400,7 +4389,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                         </div>
                         <div className="id1-datacard-body" style={{ fontSize: '7pt' }}>
                           <div style={{ marginBottom: '3px', fontWeight: 600, color: '#1e293b' }}>
-                            Layouts: {m.presets.map((p, idx) => `${['A', 'B', 'C'][idx] || ''}: ${p.deploymentName}`).join(' · ')}
+                            Layouts: {m.presets.map((p, idx) => `${getPresetLetter(p.presetName, p.layoutName, idx)}: ${p.deploymentName}`).join(' · ')}
                           </div>
                           {m.primaryMission.description && (
                             <div style={{ marginBottom: '3px' }}>

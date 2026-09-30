@@ -129,14 +129,7 @@ export interface DeploymentAnalysis {
  */
 export function calculateDeploymentFrequencies(
   matchups: DispositionMatchup[],
-  allDeployments: string[] = [
-    'Crucible Of Battle',
-    'Dawn Of War',
-    'Hammer and Anvil',
-    'Search and Destroy',
-    'Sweeping Engagement',
-    'Tipping Point'
-  ]
+  allDeployments: string[]
 ): DeploymentAnalysis {
   const allPresets = matchups.flatMap(m =>
     m.presets.map(p => ({

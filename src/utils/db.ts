@@ -6,13 +6,9 @@ import type {
   CoreRuleComponent,
   CoreRuleFaqEntry,
   DispositionIntel,
-  DispositionMatchup,
-  PrimaryMissionObjective,
-  AppSecondaryMission,
-  SecondaryMissionObjective,
-  SecondaryMissionAction
+  AppSecondaryMission
 } from '../types/data';
-import { calculateDeploymentFrequencies } from './rosterPrint';
+import { assembleDispositionIntel, assembleSecondaryMissions } from './missionIntel';
 
 
 // Handle cases where initSqlJs might be nested in a 'default' property due to Vite/ESM mismatch
@@ -2200,76 +2196,9 @@ export async function getDispositionIntel(dispositionId: string): Promise<Dispos
       console.warn('Could not load primary mission scoring:', err);
     }
 
-    // Group scoring by primaryMissionId -> objectiveId
-    const objectivesByMission = new Map<string, PrimaryMissionObjective[]>();
-    scoringRows.forEach(r => {
-      const pmId = String(r.primaryMissionId);
-      const objId = String(r.objectiveId);
-      if (!objectivesByMission.has(pmId)) objectivesByMission.set(pmId, []);
-      const objList = objectivesByMission.get(pmId)!;
-      let obj = objList.find(o => o.id === objId);
-      if (!obj) {
-        obj = {
-          id: objId,
-          name: String(r.objectiveName),
-          whenText: r.whenText != null ? String(r.whenText) : null,
-          displayOrder: Number(r.objectiveOrder) || 0,
-          scoring: []
-        };
-        objList.push(obj);
-      }
-      obj.scoring.push({
-        id: String(r.scoringId),
-        scoringCriteria: String(r.scoringCriteria),
-        victoryPoints: Number(r.victoryPoints) || 0,
-        isCumulative: Boolean(r.isCumulative),
-        displayOrder: Number(r.scoringOrder) || 0
-      });
-    });
-
-    // 3. Assemble matchups
-    const matchupMap = new Map<string, DispositionMatchup>();
-    matchupRows.forEach(r => {
-      const oppId = String(r.oppositionDispositionId);
-      if (!matchupMap.has(oppId)) {
-        const pmId = String(r.primaryMissionId);
-        matchupMap.set(oppId, {
-          oppositionDispositionId: oppId,
-          oppositionDispositionName: String(r.oppositionDispositionName),
-          primaryMission: {
-            id: pmId,
-            name: String(r.primaryMissionName),
-            lore: r.primaryMissionLore != null ? String(r.primaryMissionLore) : null,
-            description: r.primaryMissionDescription != null ? String(r.primaryMissionDescription) : null,
-            objectives: objectivesByMission.get(pmId) || []
-          },
-          presets: []
-        });
-      }
-
-      if (r.presetId && r.layoutName && r.deploymentName) {
-        matchupMap.get(oppId)!.presets.push({
-          presetId: String(r.presetId),
-          presetName: String(r.presetName),
-          layoutId: String(r.layoutId),
-          layoutName: String(r.layoutName),
-          deploymentId: String(r.deploymentId),
-          deploymentName: String(r.deploymentName)
-        });
-      }
-    });
-
-    const matchups = Array.from(matchupMap.values());
-
-    // 4. Query all distinct standard deployments for frequency calculation
-    let allDeployments = [
-      'Crucible Of Battle',
-      'Dawn Of War',
-      'Hammer and Anvil',
-      'Search and Destroy',
-      'Sweeping Engagement',
-      'Tipping Point'
-    ];
+    // 4. Query all distinct standard deployments for frequency calculation. If this
+    // fails the "never encountered" list is left empty rather than guessed.
+    let allDeployments: string[] = [];
     try {
       const allDepRows = await query(`
         SELECT DISTINCT md.name
@@ -2278,23 +2207,12 @@ export async function getDispositionIntel(dispositionId: string): Promise<Dispos
         JOIN force_disposition_mission_recommended_preset fdmrp ON fdmrp.missionPresetId = mp.id
         ORDER BY md.name
       `);
-      if (allDepRows.length > 0) {
-        allDeployments = allDepRows.map(d => String(d.name));
-      }
-    } catch {
-      // fallback to hardcoded list of standard deployments
+      allDeployments = allDepRows.map(d => String(d.name));
+    } catch (err) {
+      console.warn('Could not load the deployment list for layout odds:', err);
     }
 
-    const analysis = calculateDeploymentFrequencies(matchups, allDeployments);
-
-    return {
-      friendlyDispositionId: dispositionId,
-      friendlyDispositionName: friendlyName,
-      matchups,
-      deploymentFrequencies: analysis.frequencies,
-      totalPresets: analysis.totalPresets,
-      neverEncounteredDeployments: analysis.neverEncountered
-    };
+    return assembleDispositionIntel(dispositionId, friendlyName, matchupRows, scoringRows, allDeployments);
   } catch (err) {
     console.warn('Skipping disposition intel (tables missing or query failed):', err);
     return null;
@@ -2348,57 +2266,7 @@ export async function getSecondaryMissions(): Promise<AppSecondaryMission[]> {
       console.warn('Could not load secondary mission actions:', err);
     }
 
-    const objectivesBySM = new Map<string, SecondaryMissionObjective[]>();
-    objectiveRows.forEach(r => {
-      const smId = String(r.secondaryMissionId);
-      const objId = String(r.objectiveId);
-      if (!objectivesBySM.has(smId)) objectivesBySM.set(smId, []);
-      const objList = objectivesBySM.get(smId)!;
-      let obj = objList.find(o => o.id === objId);
-      if (!obj) {
-        obj = {
-          id: objId,
-          name: String(r.objectiveName),
-          whenText: r.whenText != null ? String(r.whenText) : null,
-          scoring: []
-        };
-        objList.push(obj);
-      }
-      obj.scoring.push({
-        id: String(r.scoringId),
-        scoringCriteria: String(r.scoringCriteria),
-        victoryPoints: Number(r.victoryPoints) || 0,
-        isCumulative: Boolean(r.isCumulative)
-      });
-    });
-
-    const actionsBySM = new Map<string, SecondaryMissionAction[]>();
-    actionRows.forEach(r => {
-      const smId = String(r.secondaryMissionId);
-      if (!actionsBySM.has(smId)) actionsBySM.set(smId, []);
-      actionsBySM.get(smId)!.push({
-        id: String(r.actionId),
-        name: String(r.name),
-        startsText: String(r.startsText),
-        completesText: String(r.completesText),
-        effectText: String(r.effectText),
-        restrictionText: r.restrictionText != null ? String(r.restrictionText) : null
-      });
-    });
-
-    return smRows.map(r => {
-      const id = String(r.id);
-      return {
-        id,
-        name: String(r.name),
-        lore: r.lore != null ? String(r.lore) : null,
-        description: r.description != null ? String(r.description) : null,
-        isFixedSecondary: Boolean(r.isFixedSecondary),
-        isScorableFirstTurn: Boolean(r.isScorableFirstTurn),
-        objectives: objectivesBySM.get(id) || [],
-        actions: actionsBySM.get(id) || []
-      };
-    });
+    return assembleSecondaryMissions(smRows, objectiveRows, actionRows);
   } catch (err) {
     console.warn('Skipping secondary missions (table missing or query failed):', err);
     return [];
