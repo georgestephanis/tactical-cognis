@@ -4,7 +4,9 @@ import {
   expectedFlatDamageAfterFnp,
   getExpectedDamageForExpression,
   profileAppliesToTarget,
-  selectProfilesForTarget
+  selectProfilesForTarget,
+  parseHunterKeywords,
+  isMalformedHunterKeyword
 } from '../src/utils/mathhammer';
 import type {
   MathhammerInput,
@@ -236,6 +238,16 @@ export function runMathhammerTests() {
   assert(gatedOnly.length === 0, "Gated-only weapon yields no profile against a non-matching target");
 
   console.log("  ✅ Conditional Hunter Profiles: PASS");
+
+  console.log("Testing: Hunter keyword parsing and malformed markers");
+  const kw = parseHunterKeywords("**BIGTHING/OTHERTHING**");
+  assert(kw.length === 2 && kw[0] === "BIGTHING" && kw[1] === "OTHERTHING", "emphasis stripped, split on slash, upper-cased");
+  assert(parseHunterKeywords(null).length === 0 && parseHunterKeywords("").length === 0, "null/empty mean an ordinary profile");
+  assert(!isMalformedHunterKeyword(null) && !isMalformedHunterKeyword(""), "SQL NULL and empty are not malformed");
+  assert(!isMalformedHunterKeyword("**BIGTHING/OTHERTHING**"), "a real keyword is not malformed");
+  assert(isMalformedHunterKeyword("**null**"), "literal **null** marker is malformed");
+  assert(isMalformedHunterKeyword(" None ") && isMalformedHunterKeyword("undefined"), "other placeholders, any case/spacing");
+  assert(!isMalformedHunterKeyword("NULLIFIER"), "a keyword merely containing 'null' is not malformed");
 
   console.log("\nAll Mathhammer Unit Tests Completed Successfully! 🎉");
 }

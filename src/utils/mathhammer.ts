@@ -326,6 +326,38 @@ export function profileAppliesToTarget(
 }
 
 /**
+ * Parses `wargear_item_profile.hunterProfileKeyword` into a keyword list.
+ *
+ * The DB stores it as emphasised, slash-separated prose — e.g. `**MONSTER/VEHICLE**`,
+ * meaning "applies against a target that is a MONSTER *or* a VEHICLE". Returns `[]`
+ * when the profile has no hunter condition (i.e. it is an ordinary profile).
+ */
+export function parseHunterKeywords(raw: unknown): string[] {
+  if (raw == null) return [];
+  return String(raw)
+    .replace(/\*/g, '')
+    .split('/')
+    .map(k => k.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+/**
+ * True for a `hunterProfileKeyword` that is a placeholder rather than a condition —
+ * the literal `**null**` (or `none`/`undefined`) some dataset exports emit when a
+ * Hunter profile's target keyword is missing.
+ *
+ * Reading it as "no condition" would make a Hunter line apply to every target and
+ * get summed on top of the Standard line (roughly doubling the weapon), and reading
+ * it as the keyword NULL makes the line silently unusable, so the profile is dropped.
+ * SQL NULL and the empty string are *not* malformed: they mean an ordinary profile.
+ */
+export function isMalformedHunterKeyword(raw: unknown): boolean {
+  if (raw == null) return false;
+  const cleaned = String(raw).replace(/\*/g, '').trim().toLowerCase();
+  return cleaned === 'null' || cleaned === 'none' || cleaned === 'undefined';
+}
+
+/**
  * Picks the profiles of a single weapon that should actually be fired at a
  * target, so callers don't double-count conditional statlines.
  *
