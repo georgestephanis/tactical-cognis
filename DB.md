@@ -381,14 +381,13 @@ doubles its output.
 
 As of v963 there are **9 such profiles across 9 weapons**, and every one stores
 the same value: `**MONSTER/VEHICLE**`. (Three further rows store the literal string
-`**null**`; `parseHunterKeywords` currently reads that as a gate on the keyword `NULL`,
-which no target matches — a known quirk, not yet special-cased.) In each case the weapon
+`**null**` — a dataset export bug for a missing keyword. `isMalformedHunterKeyword()` detects it and those profiles are dropped at load, so the weapon's ordinary profiles carry it.) In each case the weapon
 carries exactly two profiles — one named `Hunter` (gated) and one named `Standard`
 (ungated) — with the Hunter line the stronger of the two against qualifying
 targets. Use the query below to inspect the actual statlines in your own database.
 
 **Value format:** emphasised, slash-separated prose — `**` is markdown emphasis to
-be stripped, and `/` means **OR**. `src/utils/db.ts` exports `parseHunterKeywords()`
+be stripped, and `/` means **OR**. `src/utils/mathhammer.ts` exports `parseHunterKeywords()`
 which normalises `**MONSTER/VEHICLE**` to `['MONSTER', 'VEHICLE']` onto
 `WeaponProfile.hunterKeywords`; an ordinary profile gets `[]`.
 

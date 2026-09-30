@@ -84,7 +84,7 @@ The four columns currently probed all arrived with the 11th-edition data (data v
 
 Most multi-profile weapons offer every profile simultaneously. A **Hunter** profile does not: it is a statline usable *only* against targets carrying specific keywords, paired with a `Standard` profile used against everything else.
 
-`db.ts` exports `parseHunterKeywords()`, which normalises the database's emphasised, slash-separated prose (`**MONSTER/VEHICLE**`) into `['MONSTER', 'VEHICLE']` on `WeaponProfile.hunterKeywords`. Ordinary profiles get `[]`.
+`mathhammer.ts` exports `parseHunterKeywords()` (and `isMalformedHunterKeyword()`, which flags a literal `**null**` marker so `db.ts` can drop the profile), which normalises the database's emphasised, slash-separated prose (`**MONSTER/VEHICLE**`) into `['MONSTER', 'VEHICLE']` on `WeaponProfile.hunterKeywords`. Ordinary profiles get `[]`.
 
 The **decision** logic deliberately lives in the dependency-free engine (`mathhammer.ts`) so it is unit-testable — see [mathhammer_engine.md](./mathhammer_engine.md). Any consumer that aggregates a weapon's output must route through `selectProfilesForTarget()`; summing all profiles of a Hunter weapon roughly doubles its damage.
 
