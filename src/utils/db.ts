@@ -1,6 +1,18 @@
 import initSqlJs from 'sql.js';
 import type * as SQL from 'sql.js';
-import type { CoreRuleSection, CoreRuleContainer, CoreRuleComponent, CoreRuleFaqEntry } from '../types/data';
+import type {
+  CoreRuleSection,
+  CoreRuleContainer,
+  CoreRuleComponent,
+  CoreRuleFaqEntry,
+  DispositionIntel,
+  DispositionMatchup,
+  PrimaryMissionObjective,
+  AppSecondaryMission,
+  SecondaryMissionObjective,
+  SecondaryMissionAction
+} from '../types/data';
+import { calculateDeploymentFrequencies } from './rosterPrint';
 
 
 // Handle cases where initSqlJs might be nested in a 'default' property due to Vite/ESM mismatch
@@ -2120,3 +2132,276 @@ export async function getCoreRulesFaqs(): Promise<Record<string, CoreRuleFaqEntr
     return {};
   }
 }
+
+/**
+ * Fetches force disposition matchup data: the primary missions and recommended
+ * map layout presets (with deployments) when this disposition meets each opposing posture,
+ * along with overall deployment frequency and likelihood distribution.
+ */
+export async function getDispositionIntel(dispositionId: string): Promise<DispositionIntel | null> {
+  try {
+    const dispRows = await query('SELECT id, name FROM force_disposition WHERE id = ? LIMIT 1', [dispositionId]);
+    if (dispRows.length === 0) return null;
+    const friendlyName = String(dispRows[0].name);
+
+    // 1. Fetch matchup rows: friendly x opposition -> primary mission, preset, layout, deployment
+    const matchupRows = await query(`
+      SELECT 
+        fdm.id AS forceDispositionMissionId,
+        fd2.id AS oppositionDispositionId,
+        fd2.name AS oppositionDispositionName,
+        pm.id AS primaryMissionId,
+        pm.name AS primaryMissionName,
+        pm.lore AS primaryMissionLore,
+        pm.description AS primaryMissionDescription,
+        mp.id AS presetId,
+        mp.name AS presetName,
+        ml.id AS layoutId,
+        ml.name AS layoutName,
+        md.id AS deploymentId,
+        md.name AS deploymentName
+      FROM force_disposition_mission fdm
+      JOIN force_disposition fd2 ON fdm.oppositionForceDispositionId = fd2.id
+      JOIN primary_mission pm ON fdm.primaryMissionId = pm.id
+      LEFT JOIN force_disposition_mission_recommended_preset fdmrp ON fdmrp.forceDispositionMissionId = fdm.id
+      LEFT JOIN mission_preset mp ON fdmrp.missionPresetId = mp.id
+      LEFT JOIN mission_layout ml ON mp.missionLayoutId = ml.id
+      LEFT JOIN mission_deployment md ON mp.missionDeploymentId = md.id
+      WHERE fdm.friendlyForceDispositionId = ?
+      ORDER BY fd2.name, mp.name
+    `, [dispositionId]);
+
+    if (matchupRows.length === 0) return null;
+
+    // 2. Fetch primary mission objectives & scoring for the involved missions
+    const missionIds = Array.from(new Set(matchupRows.map(r => String(r.primaryMissionId))));
+    const missionIdPlaceholders = missionIds.map(() => '?').join(',');
+
+    let scoringRows: Record<string, unknown>[] = [];
+    try {
+      scoringRows = await query(`
+        SELECT 
+          pmo.primaryMissionId,
+          pmo.id AS objectiveId,
+          pmo.name AS objectiveName,
+          pmo.whenText,
+          pmo.displayOrder AS objectiveOrder,
+          pmos.id AS scoringId,
+          pmos.scoringCriteria,
+          pmos.victoryPoints,
+          pmos.isCumulative,
+          pmos.displayOrder AS scoringOrder
+        FROM primary_mission_objective pmo
+        JOIN primary_mission_objective_scoring pmos ON pmos.primaryMissionObjectiveId = pmo.id
+        WHERE pmo.primaryMissionId IN (${missionIdPlaceholders})
+        ORDER BY pmo.primaryMissionId, pmo.displayOrder, pmos.displayOrder
+      `, missionIds);
+    } catch (err) {
+      console.warn('Could not load primary mission scoring:', err);
+    }
+
+    // Group scoring by primaryMissionId -> objectiveId
+    const objectivesByMission = new Map<string, PrimaryMissionObjective[]>();
+    scoringRows.forEach(r => {
+      const pmId = String(r.primaryMissionId);
+      const objId = String(r.objectiveId);
+      if (!objectivesByMission.has(pmId)) objectivesByMission.set(pmId, []);
+      const objList = objectivesByMission.get(pmId)!;
+      let obj = objList.find(o => o.id === objId);
+      if (!obj) {
+        obj = {
+          id: objId,
+          name: String(r.objectiveName),
+          whenText: r.whenText != null ? String(r.whenText) : null,
+          displayOrder: Number(r.objectiveOrder) || 0,
+          scoring: []
+        };
+        objList.push(obj);
+      }
+      obj.scoring.push({
+        id: String(r.scoringId),
+        scoringCriteria: String(r.scoringCriteria),
+        victoryPoints: Number(r.victoryPoints) || 0,
+        isCumulative: Boolean(r.isCumulative),
+        displayOrder: Number(r.scoringOrder) || 0
+      });
+    });
+
+    // 3. Assemble matchups
+    const matchupMap = new Map<string, DispositionMatchup>();
+    matchupRows.forEach(r => {
+      const oppId = String(r.oppositionDispositionId);
+      if (!matchupMap.has(oppId)) {
+        const pmId = String(r.primaryMissionId);
+        matchupMap.set(oppId, {
+          oppositionDispositionId: oppId,
+          oppositionDispositionName: String(r.oppositionDispositionName),
+          primaryMission: {
+            id: pmId,
+            name: String(r.primaryMissionName),
+            lore: r.primaryMissionLore != null ? String(r.primaryMissionLore) : null,
+            description: r.primaryMissionDescription != null ? String(r.primaryMissionDescription) : null,
+            objectives: objectivesByMission.get(pmId) || []
+          },
+          presets: []
+        });
+      }
+
+      if (r.presetId && r.layoutName && r.deploymentName) {
+        matchupMap.get(oppId)!.presets.push({
+          presetId: String(r.presetId),
+          presetName: String(r.presetName),
+          layoutId: String(r.layoutId),
+          layoutName: String(r.layoutName),
+          deploymentId: String(r.deploymentId),
+          deploymentName: String(r.deploymentName)
+        });
+      }
+    });
+
+    const matchups = Array.from(matchupMap.values());
+
+    // 4. Query all distinct standard deployments for frequency calculation
+    let allDeployments = [
+      'Crucible Of Battle',
+      'Dawn Of War',
+      'Hammer and Anvil',
+      'Search and Destroy',
+      'Sweeping Engagement',
+      'Tipping Point'
+    ];
+    try {
+      const allDepRows = await query(`
+        SELECT DISTINCT md.name
+        FROM mission_deployment md
+        JOIN mission_preset mp ON mp.missionDeploymentId = md.id
+        JOIN force_disposition_mission_recommended_preset fdmrp ON fdmrp.missionPresetId = mp.id
+        ORDER BY md.name
+      `);
+      if (allDepRows.length > 0) {
+        allDeployments = allDepRows.map(d => String(d.name));
+      }
+    } catch {
+      // fallback to hardcoded list of standard deployments
+    }
+
+    const analysis = calculateDeploymentFrequencies(matchups, allDeployments);
+
+    return {
+      friendlyDispositionId: dispositionId,
+      friendlyDispositionName: friendlyName,
+      matchups,
+      deploymentFrequencies: analysis.frequencies,
+      totalPresets: analysis.totalPresets,
+      neverEncounteredDeployments: analysis.neverEncountered
+    };
+  } catch (err) {
+    console.warn('Skipping disposition intel (tables missing or query failed):', err);
+    return null;
+  }
+}
+
+/**
+ * Fetches the universal Secondary Missions (Chapter Approved deck), with objectives,
+ * scoring criteria, and actions.
+ */
+export async function getSecondaryMissions(): Promise<AppSecondaryMission[]> {
+  try {
+    const smRows = await query(`
+      SELECT id, name, lore, description, isFixedSecondary, isScorableFirstTurn
+      FROM secondary_mission
+      ORDER BY isFixedSecondary DESC, name ASC
+    `);
+
+    if (smRows.length === 0) return [];
+
+    let objectiveRows: Record<string, unknown>[] = [];
+    try {
+      objectiveRows = await query(`
+        SELECT 
+          smo.secondaryMissionId,
+          smo.id AS objectiveId,
+          smo.name AS objectiveName,
+          smo.whenText,
+          smo.displayOrder AS objectiveOrder,
+          smos.id AS scoringId,
+          smos.scoringCriteria,
+          smos.victoryPoints,
+          smos.isCumulative,
+          smos.displayOrder AS scoringOrder
+        FROM secondary_mission_objective smo
+        JOIN secondary_mission_objective_scoring smos ON smos.secondaryMissionObjectiveId = smo.id
+        ORDER BY smo.secondaryMissionId, smo.displayOrder, smos.displayOrder
+      `);
+    } catch (err) {
+      console.warn('Could not load secondary mission objectives:', err);
+    }
+
+    let actionRows: Record<string, unknown>[] = [];
+    try {
+      actionRows = await query(`
+        SELECT secondaryMissionId, id AS actionId, name, startsText, completesText, effectText, restrictionText
+        FROM secondary_mission_action
+        ORDER BY secondaryMissionId, name
+      `);
+    } catch (err) {
+      console.warn('Could not load secondary mission actions:', err);
+    }
+
+    const objectivesBySM = new Map<string, SecondaryMissionObjective[]>();
+    objectiveRows.forEach(r => {
+      const smId = String(r.secondaryMissionId);
+      const objId = String(r.objectiveId);
+      if (!objectivesBySM.has(smId)) objectivesBySM.set(smId, []);
+      const objList = objectivesBySM.get(smId)!;
+      let obj = objList.find(o => o.id === objId);
+      if (!obj) {
+        obj = {
+          id: objId,
+          name: String(r.objectiveName),
+          whenText: r.whenText != null ? String(r.whenText) : null,
+          scoring: []
+        };
+        objList.push(obj);
+      }
+      obj.scoring.push({
+        id: String(r.scoringId),
+        scoringCriteria: String(r.scoringCriteria),
+        victoryPoints: Number(r.victoryPoints) || 0,
+        isCumulative: Boolean(r.isCumulative)
+      });
+    });
+
+    const actionsBySM = new Map<string, SecondaryMissionAction[]>();
+    actionRows.forEach(r => {
+      const smId = String(r.secondaryMissionId);
+      if (!actionsBySM.has(smId)) actionsBySM.set(smId, []);
+      actionsBySM.get(smId)!.push({
+        id: String(r.actionId),
+        name: String(r.name),
+        startsText: String(r.startsText),
+        completesText: String(r.completesText),
+        effectText: String(r.effectText),
+        restrictionText: r.restrictionText != null ? String(r.restrictionText) : null
+      });
+    });
+
+    return smRows.map(r => {
+      const id = String(r.id);
+      return {
+        id,
+        name: String(r.name),
+        lore: r.lore != null ? String(r.lore) : null,
+        description: r.description != null ? String(r.description) : null,
+        isFixedSecondary: Boolean(r.isFixedSecondary),
+        isScorableFirstTurn: Boolean(r.isScorableFirstTurn),
+        objectives: objectivesBySM.get(id) || [],
+        actions: actionsBySM.get(id) || []
+      };
+    });
+  } catch (err) {
+    console.warn('Skipping secondary missions (table missing or query failed):', err);
+    return [];
+  }
+}
+
