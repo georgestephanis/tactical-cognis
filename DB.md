@@ -89,7 +89,7 @@ the shape doesn't.
 | `wargear_ability` + `wargear_item_profile_wargear_ability` | — | weapon special rules and their links to profiles |
 | `base_miniature_loadout` / `base_miniature_loadout_wargear_option` | — | baseline gear each miniature starts with |
 | `loadout_choice_set` → `loadout_choice` → `loadout_choice_wargear_item` | — | default loadout + swap options (`limit`, `alternate`) |
-| `wargear_option` / `wargear_option_group` | — | optional upgrades (`points`, `wargearItemId`) and grouping |
+| `wargear_option` / `wargear_option_group` | — | optional upgrades (**`points`** — see [Paid wargear](#paid-wargear), `wargearItemId`) and grouping (`miniatureId`, `instructionText`) |
 | `wargear_limit`, `limited_wargear_choice*`, `all_model_wargear_choice*`, `wargear_rule` | — | "X per N models" caps, one-per-unit constraints, conditional rules text |
 
 ### Abilities & rules
@@ -408,6 +408,45 @@ SELECT wi.name, wip.name, wip.strength, wip.armourPenetration, wip.damage, wip.h
 FROM wargear_item_profile wip JOIN wargear_item wi ON wi.id = wip.wargearItemId
 WHERE wip.hunterProfileKeyword IS NOT NULL AND wip.hunterProfileKeyword <> '';
 ```
+
+### Paid wargear (`wargear_option.points`)
+
+11th edition reintroduced **points-costed wargear**. `wargear_option.points` is a
+per-item surcharge, keyed by the owning `wargear_option_group`'s `miniatureId` plus
+the option's `wargearItemId`. A unit's true cost is its `unit_composition.points`
+**plus the price of every item it is equipped with** — including its *default*
+loadout, which the companion app materialises as ordinary
+`roster_unit_miniature_wargear_option` rows like any other selection.
+
+That last part is the trap: a datasheet's composition points are a **naked** cost, so
+reading them alone undercharges any unit whose default gear is priced. In the current
+dataset that is ~60 datasheets across most factions — heaviest in Astra Militarum,
+Adeptus Astartes, and T'au Empire.
+
+Consumed by `getLoadoutWargearPoints()` in
+[`src/utils/loadout.ts`](./src/utils/loadout.ts), which prices a resolved loadout.
+`getDatasheetCosts()` folds the default-loadout surcharge into each tier's headline
+price, and the Army Builder adds only the **delta** between a unit's actual loadout
+and its default one — so swapping a priced default for a free alternative correctly
+*reduces* the cost. Anything that computes a unit's cost must go through those two,
+never `unit_composition.points` on its own.
+
+Properties worth knowing before writing a consumer, all verified against the current
+dataset: every priced option sits in a group with a **non-null `miniatureId`**; no
+`(miniatureId, wargearItemId)` pair carries conflicting prices; and no priced item
+appears in a unit-wide (`loadout_choice_set.miniatureId IS NULL`) choice set.
+
+```sql
+-- Which options cost points, and whether they are part of the default loadout
+SELECT g.miniatureId, wo.wargearItemId, wo.points, wo.defaultValue, g.instructionText
+FROM wargear_option wo
+JOIN wargear_option_group g ON g.id = wo.wargearOptionGroupId
+WHERE wo.points != 0;
+```
+
+`points` is a later addition to the schema — probe it with `hasColumn()` before
+selecting, per [Handling schema drift](#handling-schema-drift). Without it all wargear
+prices as free, which is exactly the pre-11th-edition behaviour.
 
 ### Force dispositions (`detachment_force_disposition`)
 

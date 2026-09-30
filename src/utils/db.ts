@@ -493,7 +493,7 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
         const rules = profileAbilities.filter(pa => pa.wargearItemProfileId === p.id).map(pa => String(pa.name));
         return { name: p.name || item.name, type: p.type, range: p.range, attacks: p.attacks, ballisticSkill: p.ballisticSkill, weaponSkill: p.weaponSkill, strength: p.strength, armourPenetration: p.armourPenetration, damage: p.damage, rules: rules, hunterKeywords: parseHunterKeywords(p.hunterProfileKeyword) };
       });
-      weapons.push({ name: item.name, wargearType: item.wargearType, count: Number(opt.count), profiles: profiles });
+      weapons.push({ name: item.name, wargearType: item.wargearType, count: Number(opt.count), profiles: profiles, wargearItemId: String(opt.wargearItemId) });
     });
     miniWeaponsMap.set(String(loadout.miniatureId), weapons);
   });
@@ -521,7 +521,7 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
         const rules = profileAbilities.filter(pa => pa.wargearItemProfileId === p.id).map(pa => String(pa.name));
         return { name: p.name || item?.name, type: p.type, range: p.range, attacks: p.attacks, ballisticSkill: p.ballisticSkill, weaponSkill: p.weaponSkill, strength: p.strength, armourPenetration: p.armourPenetration, damage: p.damage, rules: rules };
       });
-      return { name: String(item?.name), wargearType: String(item?.wargearType), count: Number(ci.count), profiles: profiles };
+      return { wargearItemId: String(ci.wargearItemId), name: String(item?.name), wargearType: String(item?.wargearType), count: Number(ci.count), profiles: profiles };
     });
     if (!choiceMap.has(String(c.loadoutChoiceSetId))) choiceMap.set(String(c.loadoutChoiceSetId), []);
     choiceMap.get(String(c.loadoutChoiceSetId))!.push({ id: c.id, items: items });
@@ -684,6 +684,36 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
     console.warn('Skipping wargear option group instructions (table missing):', err);
   }
 
+  // 8f. Fetch wargear option pricing. 11th edition reintroduced paid wargear, so
+  // `wargear_option.points` carries a per-item surcharge (Twin Killsaws 5pts, Leman
+  // Russ lascannon 5pts, ...). Older companion-app DBs predate the column entirely,
+  // so probe before selecting it — an unguarded select would fail the whole faction
+  // load. Prices are keyed by (miniatureId, wargearItemId); every priced option in
+  // the current dataset sits in a group with a non-null miniatureId and no pair
+  // carries conflicting prices, so MAX() is a safe collapse across duplicate groups.
+  const wargearOptionPointsMap = new Map<string, Record<string, Record<string, number>>>();
+  try {
+    if (await hasColumn('wargear_option', 'points')) {
+      const optionPoints = await query(`
+        SELECT g.datasheetId, g.miniatureId, wo.wargearItemId, MAX(wo.points) AS points
+        FROM wargear_option wo
+        JOIN wargear_option_group g ON g.id = wo.wargearOptionGroupId
+        WHERE g.datasheetId IN (${dsIds}) AND wo.points != 0 AND g.miniatureId IS NOT NULL
+        GROUP BY g.datasheetId, g.miniatureId, wo.wargearItemId
+      `);
+      optionPoints.forEach(row => {
+        const dsId = String(row.datasheetId);
+        if (!wargearOptionPointsMap.has(dsId)) wargearOptionPointsMap.set(dsId, {});
+        const byMini = wargearOptionPointsMap.get(dsId)!;
+        const miniId = String(row.miniatureId);
+        if (!byMini[miniId]) byMini[miniId] = {};
+        byMini[miniId][String(row.wargearItemId)] = Number(row.points);
+      });
+    }
+  } catch (err) {
+    console.warn('Skipping wargear option points (column missing):', err);
+  }
+
   const miniMap = new Map();
   miniatures.forEach(m => {
     const kws = miniKeywords.filter(k => k.miniatureId === m.id).map(k => String(k.name));
@@ -748,6 +778,7 @@ async function assembleDatasheets(datasheets: Record<string, unknown>[]): Promis
     wargearRules: wargearRulesMap.get(String(ds.id)) || [],
     allModelWargearOptions: allModelWargearMap.get(String(ds.id)) || [],
     wargearInstructions: wargearInstructionsMap.get(String(ds.id)) || [],
+    wargearOptionPoints: wargearOptionPointsMap.get(String(ds.id)),
   }));
 }
 

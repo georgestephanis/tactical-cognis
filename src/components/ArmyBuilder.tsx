@@ -16,13 +16,14 @@ import {
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
 import { groupAttachedEntries } from '../utils/rosterPrint';
+import { getRosterUnitModelCounts, getUnitActiveWeapons, getLoadoutWargearPoints, getChoicePoints } from '../utils/loadout';
 import type { AttachableEntry, PrintableUnitWrapper } from '../utils/rosterPrint';
 import type { MergedFaction } from '../utils/dataMapper';
 import RulesText from './RulesText';
 import DetachmentHovercard from './DetachmentHovercard';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
-import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Datasheet, Ability, DatasheetRule, WargearChoiceSet, AppEnhancement, AppStratagem, ConditionalKeywordGrant } from '../types/data';
+import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Ability, DatasheetRule, WargearChoiceSet, WargearChoice, AppEnhancement, AppStratagem, ConditionalKeywordGrant } from '../types/data';
 
 
 interface ParsedRosterUnit {
@@ -523,7 +524,7 @@ function generateRosterText(
     ? detachmentSlugs.map(slug => factionData.detachments.find(d => d.slug === slug)?.name || slug)
     : detachmentSlugs;
   const detachmentStr = detachmentNames.join(', ') || 'No Detachments';
-  const totalPoints = roster.reduce((sum, u) => sum + getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0), 0);
+  const totalPoints = roster.reduce((sum, u) => sum + getUnitTotalPoints(u, roster, factionData), 0);
 
   if (format === 'standard') {
     const lines: string[] = [];
@@ -549,8 +550,8 @@ function generateRosterText(
       const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
       const wargear = getRosterUnitWargear(u, factionData);
       const wargearSuffix = wargear.length > 0 ? `: ${wargear.join(', ')}` : '';
-      const actualPoints = getUnitActualPoints(u, roster, factionData);
-      lines.push(`* **${u.name}${splitTag}** (${actualPoints + (u.enhancementPoints || 0)} points)${warlordTag}${wargearSuffix}`);
+      const actualPoints = getUnitTotalPoints(u, roster, factionData);
+      lines.push(`* **${u.name}${splitTag}** (${actualPoints} points)${warlordTag}${wargearSuffix}`);
       if (u.enhancementName) {
         // Non-Character enhancements are "Upgrades" in the companion app; the
         // suffix keeps that distinction while staying readable by the importer,
@@ -594,11 +595,11 @@ function generateRosterText(
       const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
       const wargear = getRosterUnitWargear(u, factionData);
       const wargearSuffix = wargear.length > 0 ? ` (${wargear.join(', ')})` : '';
-      const actualPoints = getUnitActualPoints(u, roster, factionData);
+      const actualPoints = getUnitTotalPoints(u, roster, factionData);
       const enhSuffix = u.enhancementName
         ? ` - ${u.enhancementName}${u.isCharacter ? '' : ' (Upgrade)'}`
         : '';
-      lines.push(`UNIT ${idx + 1}: ${u.name}${splitTag}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${actualPoints + (u.enhancementPoints || 0)} pts]`);
+      lines.push(`UNIT ${idx + 1}: ${u.name}${splitTag}${warlordSuffix}${wargearSuffix}${enhSuffix} - [${actualPoints} pts]`);
     });
 
     return lines.join('\n');
@@ -612,8 +613,8 @@ function generateRosterText(
   roster.forEach(u => {
     const warlordSuffix = u.isWarlord ? ', Warlord' : '';
     const splitTag = u.splitSquad ? ' (Combat Squad split)' : '';
-    const actualPoints = getUnitActualPoints(u, roster, factionData);
-    lines.push(`• ${u.name}${splitTag}${warlordSuffix} (${actualPoints + (u.enhancementPoints || 0)} pts)`);
+    const actualPoints = getUnitTotalPoints(u, roster, factionData);
+    lines.push(`• ${u.name}${splitTag}${warlordSuffix} (${actualPoints} pts)`);
     if (u.enhancementName) {
       lines.push(`  • Enhancement: ${u.enhancementName}${u.isCharacter ? '' : ' (Upgrade)'}`);
     }
@@ -629,48 +630,6 @@ function generateRosterText(
 // Module-level so the impure calls stay out of render scope (react-hooks/purity).
 function makeRosterUnitId(slug: string): string {
   return `${slug}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-}
-
-/**
- * Resolves the count of each miniature model type in a squad, handling both fixed models (like characters/sergeants)
- * and scaling models (like standard troops) based on the unit's active composition and current squad size.
- */
-function getRosterUnitModelCounts(unit: RosterUnit, datasheet: Datasheet): Record<string, number> {
-  const comp = datasheet.compositions[unit.selectedCostIndex];
-  if (!comp || !comp.models) {
-    const counts: Record<string, number> = {};
-    const firstModelId = datasheet.models[0]?.id;
-    datasheet.models.forEach(model => {
-      counts[model.name] = model.id === firstModelId ? unit.modelsCount : 0;
-    });
-    return counts;
-  }
-
-  const counts: Record<string, number> = {};
-  let scalingModelName: string | null = null;
-  let fixedCountSum = 0;
-
-  comp.models.forEach(cm => {
-    if (cm.min === cm.max) {
-      counts[cm.miniature] = cm.min;
-      fixedCountSum += cm.min;
-    } else {
-      scalingModelName = cm.miniature;
-    }
-  });
-
-  if (scalingModelName) {
-    counts[scalingModelName] = Math.max(0, unit.modelsCount - fixedCountSum);
-  } else {
-    // If all models are marked fixed but don't add up to the squad size,
-    // scale the one with the largest max
-    const scaling = [...comp.models].sort((a, b) => b.max - a.max)[0];
-    if (scaling) {
-      counts[scaling.miniature] = Math.max(0, unit.modelsCount - (fixedCountSum - scaling.min));
-    }
-  }
-
-  return counts;
 }
 
 /**
@@ -940,6 +899,39 @@ function getUnitActualPoints(unit: RosterUnit, roster: RosterUnit[], factionData
   return unit.points + extraPoints;
 }
 
+/**
+ * The wargear surcharge a unit has taken on beyond its default loadout.
+ *
+ * `unit.points` comes from a `DerivedCost` tier, whose price already includes the
+ * default loadout's wargear, so only the *difference* may be charged here — swapping
+ * a Terminator's thunder hammer for free twin lightning claws correctly returns a
+ * negative number. Returns 0 for datasheets whose wargear is all free, and for
+ * companion DBs predating `wargear_option.points`.
+ */
+function getUnitWargearPoints(unit: RosterUnit, factionData: MergedFaction | null): number {
+  if (!factionData) return 0;
+
+  const matchedCatalog = factionData.units.find(u => u.slug === unit.unitSlug)
+    || (factionData.alliedUnits && factionData.alliedUnits.find(u => u.slug === unit.unitSlug));
+  const ds = matchedCatalog?.appDatasheet;
+  if (!ds?.wargearOptionPoints) return 0;
+
+  const modelCounts = getRosterUnitModelCounts(unit, ds);
+  const actual = getLoadoutWargearPoints(ds, modelCounts, unit.wargearCounts || {});
+  const baseline = getLoadoutWargearPoints(ds, modelCounts, null);
+  return actual - baseline;
+}
+
+/**
+ * A roster unit's full cost: tier price, duplicate-unit stepping, wargear taken
+ * beyond the default loadout, and any enhancement.
+ */
+function getUnitTotalPoints(unit: RosterUnit, roster: RosterUnit[], factionData: MergedFaction | null): number {
+  return getUnitActualPoints(unit, roster, factionData)
+    + getUnitWargearPoints(unit, factionData)
+    + (unit.enhancementPoints || 0);
+}
+
 /** One weapon profile, flattened for tabular display on a datacard. */
 interface WeaponProfileRow {
   name: string;
@@ -1008,7 +1000,7 @@ function getPrintableRoster(
         id: u.id,
         unit: u,
         count: 1,
-        pointsRange: `${getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0)}`
+        pointsRange: `${getUnitTotalPoints(u, roster, factionData)}`
       })),
       factionData
     );
@@ -1028,7 +1020,7 @@ function getPrintableRoster(
     const rep = { ...group[0] };
     const count = group.length;
 
-    const ptsList = group.map(u => getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0));
+    const ptsList = group.map(u => getUnitTotalPoints(u, roster, factionData));
     const minPts = Math.min(...ptsList);
     const maxPts = Math.max(...ptsList);
     const pointsRange = minPts === maxPts ? `${minPts}` : `${minPts}-${maxPts}`;
@@ -1067,11 +1059,11 @@ function getPrintableCardsRoster(
   const rawCards = roster.flatMap(unit => {
     if (unit.splitSquad) {
       return [
-        { ...unit, id: `${unit.id}-squad-a`, virtualName: `${unit.name} (Squad A)`, virtualModelsCount: 5, virtualPoints: getUnitActualPoints(unit, roster, factionData) / 2 },
-        { ...unit, id: `${unit.id}-squad-b`, virtualName: `${unit.name} (Squad B)`, virtualModelsCount: 5, virtualPoints: getUnitActualPoints(unit, roster, factionData) / 2 }
+        { ...unit, id: `${unit.id}-squad-a`, virtualName: `${unit.name} (Squad A)`, virtualModelsCount: 5, virtualPoints: getUnitTotalPoints(unit, roster, factionData) / 2 },
+        { ...unit, id: `${unit.id}-squad-b`, virtualName: `${unit.name} (Squad B)`, virtualModelsCount: 5, virtualPoints: getUnitTotalPoints(unit, roster, factionData) / 2 }
       ];
     }
-    return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount, virtualPoints: getUnitActualPoints(unit, roster, factionData) + (unit.enhancementPoints || 0) }];
+    return [{ ...unit, virtualName: unit.name, virtualModelsCount: unit.modelsCount, virtualPoints: getUnitTotalPoints(unit, roster, factionData) }];
   });
 
   if (!collapseDuplicates) {
@@ -1175,133 +1167,6 @@ function formatStratagemCategory(category: string | null): string {
   return category
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/^./, c => c.toUpperCase());
-}
-
-/**
- * Calculates active weapons for a model in a squad, taking counts into account.
- * Overlapping choices replace default weapons, while non-overlapping choices are added.
- */
-function getUnitActiveWeapons(
-  unit: RosterUnit,
-  model: Model,
-  totalModelCount: number,
-  isFirstActiveModel: boolean = true
-): Weapon[] {
-  if (!model.weapons) return [];
-  const wargearCounts = unit.wargearCounts || {};
-
-  const sets = model.wargearChoiceSets || [];
-  if (sets.length === 0) {
-    return model.weapons.map(w => ({ ...w, count: w.count * totalModelCount }));
-  }
-
-  const activeWeapons: Weapon[] = [];
-
-  // Track remaining counts of each default weapon individually
-  const defaultWeaponRemaining = new Map<string, number>();
-  model.weapons.forEach(w => {
-    defaultWeaponRemaining.set(w.name, w.count * totalModelCount);
-  });
-
-  // Separate choice sets into replacement sets (swaps) and addition sets
-  const replacementSets = sets.filter(set =>
-    set.alternate || set.choices.some(choice =>
-      choice.items.some(item => model.weapons.some(w => w.name === item.name))
-    )
-  );
-
-  const additionSets = sets.filter(set => !replacementSets.includes(set));
-
-  // Process replacement sets
-  replacementSets.forEach(set => {
-    const maxAllowedForSet = set.miniatureId ? (set.limit * totalModelCount) : set.limit;
-    let remainingAllowed = Math.min(totalModelCount, maxAllowedForSet);
-    let actualSelectedCount = 0;
-
-    // Add selected weapons
-    set.choices.forEach(choice => {
-      const count = wargearCounts[choice.id] || 0;
-      // We don't add weapons if this choice is the default option itself
-      const isDefaultChoice = choice.items.every(item => model.weapons.some(w => w.name === item.name));
-      if (isDefaultChoice) return;
-
-      const allowedCount = Math.min(count, remainingAllowed);
-      if (allowedCount > 0) {
-        actualSelectedCount += allowedCount;
-        remainingAllowed -= allowedCount;
-        choice.items.forEach(item => {
-          const existing = activeWeapons.find(w => w.name === item.name);
-          if (existing) {
-            existing.count += item.count * allowedCount;
-          } else {
-            activeWeapons.push({
-              name: item.name,
-              wargearType: item.wargearType,
-              count: item.count * allowedCount,
-              profiles: item.profiles
-            });
-          }
-        });
-      }
-    });
-
-    // Reduce the count of the default weapons replaced by this choice set
-    const replacedDefaultWeapons = set.alternate
-      ? model.weapons
-      : model.weapons.filter(w =>
-          set.choices.some(choice => choice.items.some(item => item.name === w.name))
-        );
-
-    replacedDefaultWeapons.forEach(w => {
-      const currentRemaining = defaultWeaponRemaining.get(w.name) || 0;
-      const reduction = w.count * actualSelectedCount;
-      defaultWeaponRemaining.set(w.name, Math.max(0, currentRemaining - reduction));
-    });
-  });
-
-  // Now add the default weapons that are still remaining
-  model.weapons.forEach(w => {
-    const remaining = defaultWeaponRemaining.get(w.name) || 0;
-    if (remaining > 0) {
-      const existing = activeWeapons.find(aw => aw.name === w.name);
-      if (existing) {
-        existing.count += remaining;
-      } else {
-        activeWeapons.push({
-          ...w,
-          count: remaining
-        });
-      }
-    }
-  });
-
-  // Process addition sets (e.g. Ammo Runts, Grot Orderlies, Seeker Missiles)
-  additionSets.forEach(set => {
-    // If it's a unit-wide option, only add it if this is the first active model being processed
-    if (!set.miniatureId && !isFirstActiveModel) {
-      return;
-    }
-    set.choices.forEach(choice => {
-      const count = wargearCounts[choice.id] || 0;
-      if (count > 0) {
-        choice.items.forEach(item => {
-          const existing = activeWeapons.find(w => w.name === item.name);
-          if (existing) {
-            existing.count += item.count * count;
-          } else {
-            activeWeapons.push({
-              name: item.name,
-              wargearType: item.wargearType,
-              count: item.count * count,
-              profiles: item.profiles
-            });
-          }
-        });
-      }
-    });
-  });
-
-  return activeWeapons;
 }
 
 interface ArmyBuilderProps {
@@ -1715,6 +1580,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
         isWarlord: parsedUnit.isWarlord,
         isFactionPack: matchedUnit.isFactionPack || false,
         selectedCostIndex,
+        compositionIndex: costs[selectedCostIndex]?.compositionIndex,
         enhancementName: validEnhancementName,
         enhancementPoints: enhancementPoints > 0 ? enhancementPoints : undefined,
         selectedWargearChoices,
@@ -1741,7 +1607,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }
     let targetLimit = parsed.pointLimit;
     if (!targetLimit || targetLimit <= 0) {
-      const importedTotalPoints = newRosterUnits.reduce((sum, u) => sum + getUnitActualPoints(u, newRosterUnits, faction) + (u.enhancementPoints || 0), 0);
+      const importedTotalPoints = newRosterUnits.reduce((sum, u) => sum + getUnitTotalPoints(u, newRosterUnits, faction), 0);
       targetLimit = importedTotalPoints;
     }
 
@@ -2005,7 +1871,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       isCharacter,
       isBattleline,
       isFactionPack: mergedUnit.isFactionPack || false,
-      selectedCostIndex: 0
+      selectedCostIndex: 0,
+      compositionIndex: costs[0]?.compositionIndex
     };
 
     setRoster(prev => [...prev, newUnit]);
@@ -2045,6 +1912,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       return {
         ...u,
         selectedCostIndex: costIndex,
+        compositionIndex: costs[costIndex]?.compositionIndex,
         points,
         modelsCount
       };
@@ -2141,7 +2009,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // Calculate points total
   const calculateTotalPoints = (): number => {
     return roster.reduce((sum, u) => {
-      return sum + getUnitActualPoints(u, roster, factionData) + (u.enhancementPoints || 0);
+      return sum + getUnitTotalPoints(u, roster, factionData);
     }, 0);
   };
 
@@ -4076,6 +3944,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }).filter(e => isUnitEligibleForEnhancement(keywords, e));
     const hasFactionNonCharEnh = factionData?.detachments?.some(d => d.enhancements?.some(e => e.isEquipableByNonCharacterUnit)) || false;
 
+    // Computed once per card: resolving the loadout is not free and the badge reads it twice.
+    const wargearDelta = getUnitWargearPoints(unit, factionData);
+
     // Leader attach targets (units in roster that are not characters and are compatible)
     const validBodyguards = roster.filter(b => !b.isCharacter);
 
@@ -4105,11 +3976,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--accent-gold)' }}>
-                {getUnitActualPoints(unit, roster, factionData) + (unit.enhancementPoints || 0)} pts
+                {getUnitTotalPoints(unit, roster, factionData)} pts
               </span>
               {getUnitActualPoints(unit, roster, factionData) > unit.points && (
                 <span style={{ fontSize: '0.65rem', color: 'var(--accent-red)', fontWeight: 600 }}>
                   (+{getUnitActualPoints(unit, roster, factionData) - unit.points} duplicate cost)
+                </span>
+              )}
+              {wargearDelta !== 0 && (
+                <span style={{ fontSize: '0.65rem', color: 'var(--accent-teal)', fontWeight: 600 }}>
+                  ({wargearDelta > 0 ? '+' : ''}{wargearDelta} wargear)
                 </span>
               )}
             </div>
@@ -4369,6 +4245,18 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
           if (!hasDisplayableWargear) return null;
 
+          /**
+           * Choice label, with the per-model wargear surcharge appended when the
+           * option costs points. Shared by all four picker widgets below so the
+           * annotation can't go missing from one of them.
+           */
+          const choiceLabel = (choice: WargearChoice, model: Model): string => {
+            const base = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+            if (!base) return base;
+            const pts = getChoicePoints(matchedCatalog.appDatasheet!, model.id, choice);
+            return pts > 0 ? `${base} (+${pts} pts)` : base;
+          };
+
           const renderWargearChoiceSet = (set: WargearChoiceSet, totalModelCount: number, model: Model, setIdx: number) => {
             const nonEmptyChoices = set.choices.filter(c => c.items.length > 0);
             const isUnrestrictedCheckboxList = !set.allowDuplicates && set.limit >= nonEmptyChoices.length;
@@ -4379,7 +4267,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               return (
                 <div key={set.id || setIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
                   {nonEmptyChoices.map((choice) => {
-                    const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                    const label = choiceLabel(choice, model);
                     const isChecked = (unit.wargearCounts?.[choice.id] || 0) > 0;
                     return (
                       <label
@@ -4453,7 +4341,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   >
                     <option value="">{defaultLabel}</option>
                     {otherChoices.map((choice, cidx) => {
-                      const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                      const label = choiceLabel(choice, model);
                       const optionLabel = label || "-- None --";
                       return (
                         <option key={choice.id || cidx} value={choice.id}>
@@ -4476,7 +4364,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   </span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
                     {set.choices.map((choice) => {
-                      const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                      const label = choiceLabel(choice, model);
                       if (!label) return null; // skip empty/default slots in multi-select checkbox list
                       
                       const isChecked = (unit.wargearCounts?.[choice.id] || 0) > 0;
@@ -4529,7 +4417,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                     {set.choices.map((choice, cidx) => {
-                      const label = choice.items.map(item => `${item.name}${item.count > 1 ? ` x${item.count}` : ''}`).join(', ');
+                      const label = choiceLabel(choice, model);
                       const currentCount = unit.wargearCounts?.[choice.id] || 0;
                       const isDefaultChoice = choice.items.every(item => model.weapons?.some(w => w.name === item.name));
 

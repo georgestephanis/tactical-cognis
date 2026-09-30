@@ -38,6 +38,14 @@ export interface Weapon {
   wargearType: string; // 'weapon' | 'wargear'
   count: number;
   profiles: WeaponProfile[];
+  /**
+   * `wargear_item.id`, when the weapon came from a resolvable loadout option.
+   *
+   * Carried so wargear pricing can be keyed by id rather than display name —
+   * see `getLoadoutWargearPoints` in `utils/loadout.ts`. Optional because
+   * `Weapon` is also built from paths that have no option row behind them.
+   */
+  wargearItemId?: string;
 }
 
 export interface WargearChoiceItem {
@@ -175,6 +183,16 @@ export interface Datasheet {
   allModelWargearOptions?: string[];
   /** Companion-app wargear-picker instruction prose (`wargear_option_group.instructionText`), display-only. */
   wargearInstructions?: string[];
+  /**
+   * Per-item wargear surcharges (`wargear_option.points`), as
+   * `miniatureId -> wargearItemId -> points`. Only non-zero prices are present.
+   *
+   * 11th edition reintroduced paid wargear, so a unit's cost is its composition
+   * points plus the price of every item it is *equipped with* — defaults included
+   * (a Ravager is 110 + three 5pt dark lances = 125). Absent entirely on companion
+   * DBs predating the column, in which case all wargear is treated as free.
+   */
+  wargearOptionPoints?: Record<string, Record<string, number>>;
 }
 
 export interface AppDetachmentRule {
@@ -421,6 +439,12 @@ export interface RosterUnit {
   isBattleline: boolean;
   isFactionPack: boolean;
   selectedCostIndex: number;
+  /**
+   * Index of the chosen tier's composition in `Datasheet.compositions`. Distinct from
+   * `selectedCostIndex`, which indexes the *filtered* cost list. Absent on units
+   * created before this field existed; model counts then fall back to `selectedCostIndex`.
+   */
+  compositionIndex?: number;
   attachedToId?: string; // ID of target bodyguard squad
   enhancementName?: string;
   enhancementPoints?: number;

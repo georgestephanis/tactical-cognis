@@ -49,6 +49,13 @@ Prefer this pattern (plain asserts, zero-dependency, run via `tsx`) if you add c
 - **`datasheet.isLegends`** — Warhammer Legends datasheets. They carry ordinary faction keywords and real points, so they are indistinguishable from codex units unless you read the flag. Surfaced as `MergedUnit.isLegends`; hidden by default, badged where shown, and flagged by Army Builder validation (not legal in matched play). Mirror the Combat Patrol handling when adding a new consumer.
 - **`wargear_item_profile.hunterProfileKeyword`** — a conditional "Hunter" statline usable only against listed target keywords, paired with a `Standard` line. **Anything that sums a weapon's profiles must route through `selectProfilesForTarget()`** — summing a Hunter weapon's profiles roughly doubles its output. Parsed into `WeaponProfile.hunterKeywords` by `parseHunterKeywords()` in `db.ts`.
 
+- **`wargear_option.points`** — 11th edition reintroduced paid wargear. A unit costs its
+  composition points **plus the price of every item it is equipped with, defaults included**
+  (a Ravager is 110 + three 5pt dark lances = 125), so `unit_composition.points` on its own
+  undercharges ~60 datasheets. Price a loadout with `getLoadoutWargearPoints()` in
+  `utils/loadout.ts`; `getDatasheetCosts()` folds the default surcharge into each tier and
+  the Army Builder adds only the delta from default. Never total a unit's cost any other way.
+
 - **`detachment_force_disposition`** — a detachment's force disposition, crossed with the opponent's, picks the primary mission. Nearly all map to exactly one, but a detachment **may offer a choice** (exactly one detachment does today, added by the 11th-edition codex). Anything that treats disposition as single-valued will be wrong for that case — `MergedDetachment.forceDispositions` is an array, and the Army Builder validates that a choice has been made.
 
 **Schema drift:** uploaded databases come from many companion-app releases. Any column added by a newer release must be probed with the cached `hasColumn(table, column)` helper in `db.ts` and folded into the projection conditionally (`'0 AS isLegends'` etc.) — never selected unguarded, or one missing column fails the whole faction load. Verify changes against both a current DB and a copy with the new columns dropped.

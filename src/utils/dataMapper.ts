@@ -18,6 +18,7 @@ import type {
   DetachmentDetail,
   LinkedDatasheet
 } from '../types/data';
+import { getLoadoutWargearPoints } from './loadout';
 import {
   initDatabase,
   getUnitsByFaction,
@@ -59,8 +60,25 @@ export interface MergedFaction {
  */
 export interface DerivedCost {
   label: string;
+  /** Total cost: composition points plus the tier's default wargear surcharge. */
   points: number;
   models: number;
+  /**
+   * Index of this tier's composition in `Datasheet.compositions`.
+   *
+   * `getDatasheetCosts` filters the compositions down to the eligible, priced
+   * subset, so a tier's position in the returned list is *not* its position in
+   * `compositions`. Anything that needs the composition behind a tier (model
+   * counts for wargear pricing) must use this, never the list index.
+   */
+  compositionIndex: number;
+  /**
+   * The default-wargear component already included in `points`.
+   *
+   * Exposed so the Army Builder can charge only the *delta* between a unit's
+   * actual loadout and its default one, rather than double-counting defaults.
+   */
+  wargearPoints: number;
 }
 
 /**
@@ -128,11 +146,25 @@ export function getDatasheetCosts(
   return targetCompositions
     .filter(c => c.points != null && Number(c.points) > 0)
     .map(c => {
+      const compositionIndex = ds.compositions.indexOf(c);
       const models = (c.models || []).reduce((sum, m) => sum + (m.max ?? m.min ?? 0), 0);
+
+      // 11th edition reintroduced paid wargear, and a unit is priced with the gear
+      // it is equipped with — defaults included. Fold this tier's default loadout
+      // surcharge into the headline cost so every view that prices a unit off this
+      // helper (Faction Browser, Deep Analysis, Army Builder) agrees with the book.
+      const modelCounts: Record<string, number> = {};
+      (c.models || []).forEach(m => {
+        modelCounts[m.miniature] = (modelCounts[m.miniature] || 0) + (m.max ?? m.min ?? 0);
+      });
+      const wargearPoints = getLoadoutWargearPoints(ds, modelCounts, null);
+
       return {
         label: models > 0 ? `${models} model${models === 1 ? '' : 's'}` : 'Unit',
-        points: Number(c.points),
+        points: Number(c.points) + wargearPoints,
         models,
+        compositionIndex,
+        wargearPoints,
       };
     });
 }

@@ -14,7 +14,7 @@
     "db:sanitize": "node scripts/sanitize_db.cjs",
     "refresh": "npm run db:find && npm run db:sanitize -- --force",
     "build:distributable": "node scripts/build_distributable.cjs",
-    "test": "npx tsx tests/mathhammer.test.ts && npx tsx tests/rosterPrint.test.ts"
+    "test": "npx tsx tests/mathhammer.test.ts && npx tsx tests/rosterPrint.test.ts && npx tsx tests/loadout.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
