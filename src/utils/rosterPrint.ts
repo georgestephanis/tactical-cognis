@@ -5,7 +5,13 @@
  * without pulling React in, and so `react-refresh` isn't tripped by a
  * non-component export.
  */
-import type { RosterUnit } from '../types/data';
+import type {
+  RosterUnit,
+  MergedDetachment,
+  PrintableDetachmentRule,
+  DispositionMatchup,
+  DeploymentFrequency
+} from '../types/data';
 import type { MergedFaction } from './dataMapper';
 
 /** A row in the printable roster: a unit plus its indentation and role. */
@@ -95,3 +101,100 @@ export function groupAttachedEntries(
 
   return result;
 }
+
+/**
+ * Flattens the detachment rules granted by every selected detachment into one
+ * printable list, tagged with the parent detachment's name.
+ */
+export function getPrintableDetachmentRules(
+  detachments: MergedDetachment[]
+): PrintableDetachmentRule[] {
+  return detachments.flatMap(det =>
+    (det.rules || []).map(rule => ({
+      ...rule,
+      detachmentName: det.name
+    }))
+  );
+}
+
+export interface DeploymentAnalysis {
+  frequencies: DeploymentFrequency[];
+  neverEncountered: string[];
+  totalPresets: number;
+}
+
+/**
+ * Computes the deployment frequency distribution for a disposition's matchups,
+ * identifying which map layouts are most likely to appear vs never encountered.
+ */
+export function calculateDeploymentFrequencies(
+  matchups: DispositionMatchup[],
+  allDeployments: string[]
+): DeploymentAnalysis {
+  const allPresets = matchups.flatMap(m =>
+    m.presets.map(p => ({
+      ...p,
+      oppositionName: m.oppositionDispositionName
+    }))
+  );
+
+  const totalPresets = allPresets.length;
+  if (totalPresets === 0) {
+    return { frequencies: [], neverEncountered: [...allDeployments].sort(), totalPresets: 0 };
+  }
+
+  const countMap = new Map<string, { count: number; matchups: Set<string> }>();
+  allDeployments.forEach(dep => countMap.set(dep, { count: 0, matchups: new Set<string>() }));
+
+  allPresets.forEach(preset => {
+    if (!countMap.has(preset.deploymentName)) {
+      countMap.set(preset.deploymentName, { count: 0, matchups: new Set<string>() });
+    }
+    const entry = countMap.get(preset.deploymentName)!;
+    entry.count += 1;
+    entry.matchups.add(preset.oppositionName);
+  });
+
+  const frequencies: DeploymentFrequency[] = [];
+  const neverEncountered: string[] = [];
+
+  Array.from(countMap.entries()).forEach(([depName, data]) => {
+    if (data.count === 0) {
+      neverEncountered.push(depName);
+    } else {
+      frequencies.push({
+        deploymentName: depName,
+        count: data.count,
+        totalPresets,
+        percentage: Math.round((data.count / totalPresets) * 100),
+        matchups: Array.from(data.matchups).sort()
+      });
+    }
+  });
+
+  frequencies.sort((a, b) => b.count - a.count || a.deploymentName.localeCompare(b.deploymentName));
+  neverEncountered.sort();
+
+  return { frequencies, neverEncountered, totalPresets };
+}
+
+/**
+ * Visual badge metadata for deployment occurrence rates in print / slate views.
+ */
+export function getDeploymentLikelihoodBadge(percentage: number): {
+  label: string;
+  color: string;
+  textColor: string;
+} {
+  if (percentage >= 25) {
+    return { label: 'Most Likely', color: '#dcfce7', textColor: '#15803d' };
+  }
+  if (percentage >= 15) {
+    return { label: 'Likely', color: '#e0f2fe', textColor: '#0369a1' };
+  }
+  if (percentage > 0) {
+    return { label: 'Rare', color: '#fef3c7', textColor: '#b45309' };
+  }
+  return { label: 'Never', color: '#f3f4f6', textColor: '#4b5563' };
+}
+

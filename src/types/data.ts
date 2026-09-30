@@ -514,3 +514,99 @@ export interface CoreRuleFaqEntry {
   errataHeader: string | null;
   errataText: string | null;
 }
+
+export interface MissionPresetInfo {
+  presetId: string;
+  presetName: string;
+  layoutId: string;
+  layoutName: string;
+  deploymentId: string;
+  deploymentName: string;
+}
+
+export interface PrimaryMissionObjectiveScoring {
+  id: string;
+  scoringCriteria: string;
+  victoryPoints: number;
+  isCumulative: boolean;
+  displayOrder: number;
+}
+
+export interface PrimaryMissionObjective {
+  id: string;
+  name: string;
+  whenText: string | null;
+  displayOrder: number;
+  scoring: PrimaryMissionObjectiveScoring[];
+}
+
+export interface PrimaryMissionDetail {
+  id: string;
+  name: string;
+  lore: string | null;
+  description: string | null;
+  objectives: PrimaryMissionObjective[];
+}
+
+export interface DispositionMatchup {
+  oppositionDispositionId: string;
+  oppositionDispositionName: string;
+  primaryMission: PrimaryMissionDetail;
+  presets: MissionPresetInfo[];
+}
+
+export interface DeploymentFrequency {
+  deploymentName: string;
+  count: number;
+  totalPresets: number;
+  percentage: number;
+  matchups: string[];
+}
+
+export interface DispositionIntel {
+  friendlyDispositionId: string;
+  friendlyDispositionName: string;
+  matchups: DispositionMatchup[];
+  deploymentFrequencies: DeploymentFrequency[];
+  totalPresets: number;
+  neverEncounteredDeployments: string[];
+}
+
+export interface SecondaryMissionAction {
+  id: string;
+  name: string;
+  startsText: string;
+  completesText: string;
+  effectText: string;
+  restrictionText: string | null;
+}
+
+export interface SecondaryMissionObjectiveScoring {
+  id: string;
+  scoringCriteria: string;
+  victoryPoints: number;
+  isCumulative: boolean;
+}
+
+export interface SecondaryMissionObjective {
+  id: string;
+  name: string;
+  whenText: string | null;
+  scoring: SecondaryMissionObjectiveScoring[];
+}
+
+export interface AppSecondaryMission {
+  id: string;
+  name: string;
+  lore: string | null;
+  description: string | null;
+  isFixedSecondary: boolean;
+  isScorableFirstTurn: boolean;
+  objectives: SecondaryMissionObjective[];
+  actions: SecondaryMissionAction[];
+}
+
+export interface PrintableDetachmentRule extends AppDetachmentRule {
+  detachmentName: string;
+}
+

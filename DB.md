@@ -230,9 +230,9 @@ The 2026-09-08 pass closed the whole former "content-integration gaps" list (see
 - **Missions & live battle tracking** (the one cluster that actually is
   scorekeeping — not wired up, and arguably out of scope for a reference/builder
   app): `mission_pack`, `mission_preset`, `mission_layout(_linked_deployment)`,
-  `mission_deployment`, `mission_twist`, `primary_mission(_action/_objective*)`,
-  `secondary_mission(_action/_objective*/_restricted_secondary_mission)`,
-  `secondary_objective`, `objective`, `force_disposition_mission_recommended_preset`, `battle`,
+  `mission_deployment`, `mission_twist`, `primary_mission(_action)`,
+  `secondary_mission_restricted_secondary_mission`,
+  `secondary_objective`, `objective`, `battle`,
   `battle_player(_detachment/_secondary_mission/_turn*)`.
 - **Narrow enhancement/legality edge cases**, individually low-payoff (see the
   near-empty-tables note in TODO.md — most of these are 0-2 rows locally):
@@ -466,6 +466,15 @@ mission presets on top.
 
 The companion app records the player's pick on `roster.forceDispositionId` and
 `battle_player.forceDispositionId`.
+
+**Read by the Army Builder's print export** (`getDispositionIntel` / `getSecondaryMissions`
+in `db.ts`, assembled by `utils/missionIntel.ts`): for the army's active disposition it
+lists the primary mission and recommended layouts per opposing disposition, and how often
+each deployment map comes up across those presets (the tie-breaker being that each opposing
+disposition is treated as equally likely). `primary_mission_objective*` and
+`secondary_mission(_action/_objective*)` supply the scoring text. **Nothing in the schema
+links a secondary mission to a disposition** — the 18-card deck is the same for every army —
+so the export prints the whole deck rather than a per-disposition subset.
 
 **The case worth handling:** a detachment usually maps to exactly one disposition,
 but *may offer several for the player to choose between*. As of v946, of 294

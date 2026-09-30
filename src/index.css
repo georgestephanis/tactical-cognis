@@ -1614,6 +1614,34 @@ code {
   text-overflow: clip;
 }
 
+/* Detachment rule cards reuse the .id1-datacard shell with an amber/gold accent bar */
+.detachment-rule-datacard {
+  border-left: calc(1.2mm * var(--card-scale)) solid var(--accent-gold, #f59e0b) !important;
+}
+
+.detachment-rule-datacard-subhead {
+  font-size: calc(6pt * var(--card-scale));
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: calc(0.5mm * var(--card-scale));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cards-size-half .detachment-rule-datacard-subhead,
+.cards-size-full .detachment-rule-datacard-subhead {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* Mission & disposition datacards get a purple accent bar */
+.disposition-datacard {
+  border-left: calc(1.2mm * var(--card-scale)) solid #8b5cf6 !important;
+}
+
 .print-bw-roster-header {
   border-bottom: 2px solid #000;
   padding-bottom: 0.5rem;

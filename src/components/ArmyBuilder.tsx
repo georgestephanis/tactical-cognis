@@ -15,15 +15,16 @@ import {
   Share2
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
-import { groupAttachedEntries } from '../utils/rosterPrint';
+import { groupAttachedEntries, getPrintableDetachmentRules, getDeploymentLikelihoodBadge } from '../utils/rosterPrint';
+import { getPresetLetter } from '../utils/missionIntel';
 import { getRosterUnitModelCounts, getUnitActiveWeapons, getLoadoutWargearPoints, getChoicePoints } from '../utils/loadout';
 import type { AttachableEntry, PrintableUnitWrapper } from '../utils/rosterPrint';
 import type { MergedFaction } from '../utils/dataMapper';
 import RulesText from './RulesText';
 import DetachmentHovercard from './DetachmentHovercard';
-import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail } from '../utils/db';
+import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail, getDispositionIntel, getSecondaryMissions } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
-import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Ability, DatasheetRule, WargearChoiceSet, WargearChoice, AppEnhancement, AppStratagem, ConditionalKeywordGrant } from '../types/data';
+import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Ability, DatasheetRule, WargearChoiceSet, WargearChoice, AppEnhancement, AppStratagem, ConditionalKeywordGrant, DispositionIntel, AppSecondaryMission } from '../types/data';
 
 
 interface ParsedRosterUnit {
@@ -1246,8 +1247,16 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const [collapseDuplicates, setCollapseDuplicates] = useState<boolean>(false);
   // Datacard footprint. 'id1' is the exact credit-card spec size; 'half' and
   // 'full' are fractions of the printable width of the sheet, and scale the
-  // card's type up with them.
   const [cardSize, setCardSize] = useState<'id1' | 'half' | 'full'>('id1');
+  // Section inclusion toggles for the print preview
+  const [printIncludeDetachmentRules, setPrintIncludeDetachmentRules] = useState<boolean>(true);
+  const [printIncludeStratagems, setPrintIncludeStratagems] = useState<boolean>(true);
+  const [printIncludeMissionIntel, setPrintIncludeMissionIntel] = useState<boolean>(true);
+  const [printIncludeSecondaries, setPrintIncludeSecondaries] = useState<boolean>(true);
+
+  // Dynamic tactical intelligence for chosen force disposition & secondary missions
+  const [dispositionIntel, setDispositionIntel] = useState<DispositionIntel | null>(null);
+  const [secondaryMissions, setSecondaryMissions] = useState<AppSecondaryMission[]>([]);
 
   // Import states
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
@@ -2013,11 +2022,13 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     }, 0);
   };
 
-  const selectedDetachments = factionData
-    ? selectedDetachmentSlugs
-        .map(slug => factionData.detachments.find(d => d.slug === slug))
-        .filter((d): d is MergedDetachment => !!d)
-    : [];
+  const selectedDetachments = React.useMemo(() => {
+    return factionData
+      ? selectedDetachmentSlugs
+          .map(slug => factionData.detachments.find(d => d.slug === slug))
+          .filter((d): d is MergedDetachment => !!d)
+      : [];
+  }, [factionData, selectedDetachmentSlugs]);
 
   // Declared allegiance ability names (resolved from ids) + sub-faction keywords,
   // threaded into keyword-grant evaluation so allegiance/roster-keyword-gated
@@ -2026,6 +2037,40 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const selectedAllegianceAbilityNames = selectedAllegianceAbilityIds
     .map(id => allAllegianceAbilities.find(a => a.id === id)?.name)
     .filter((n): n is string => !!n);
+
+  // Active chosen force disposition ID (resolved from chosen selection or implicit single option)
+  const activeDispositionId = React.useMemo(() => {
+    for (const d of selectedDetachments) {
+      const opts = d.forceDispositions || [];
+      if (opts.length > 1) {
+        if (selectedForceDispositionIds[d.id]) return selectedForceDispositionIds[d.id];
+      } else if (opts.length === 1) {
+        return opts[0].id;
+      }
+    }
+    return null;
+  }, [selectedDetachments, selectedForceDispositionIds]);
+
+  // Load disposition matchup intel & secondary missions when print preview is open
+  useEffect(() => {
+    if (!isPrintPreviewOpen) return;
+    let active = true;
+
+    Promise.all([
+      activeDispositionId ? getDispositionIntel(activeDispositionId) : Promise.resolve(null),
+      getSecondaryMissions()
+    ])
+      .then(([intel, secondaries]) => {
+        if (!active) return;
+        setDispositionIntel(intel);
+        setSecondaryMissions(secondaries);
+      })
+      .catch(err => {
+        console.warn('Failed to load print slate mission/disposition data:', err);
+      });
+
+    return () => { active = false; };
+  }, [isPrintPreviewOpen, activeDispositionId]);
 
   // Filter list of catalog units
   const filteredCatalog = factionData ? [...factionData.units, ...(factionData.alliedUnits || [])].filter(unit => {
@@ -3390,15 +3435,53 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   }
                 </p>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', color: '#0f172a' }}>
-                <input
-                  type="checkbox"
-                  checked={collapseDuplicates}
-                  onChange={(e) => setCollapseDuplicates(e.target.checked)}
-                  style={{ cursor: 'pointer' }}
-                />
-                Collapse Identical Units
-              </label>
+              <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', color: '#0f172a' }}>
+                  <input
+                    type="checkbox"
+                    checked={collapseDuplicates}
+                    onChange={(e) => setCollapseDuplicates(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Collapse Units
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', color: '#0f172a' }}>
+                  <input
+                    type="checkbox"
+                    checked={printIncludeDetachmentRules}
+                    onChange={(e) => setPrintIncludeDetachmentRules(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Detachment Rules
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', color: '#0f172a' }}>
+                  <input
+                    type="checkbox"
+                    checked={printIncludeStratagems}
+                    onChange={(e) => setPrintIncludeStratagems(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Stratagems
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', color: '#0f172a' }}>
+                  <input
+                    type="checkbox"
+                    checked={printIncludeMissionIntel}
+                    onChange={(e) => setPrintIncludeMissionIntel(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Disposition & Map Intel
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', color: '#0f172a' }}>
+                  <input
+                    type="checkbox"
+                    checked={printIncludeSecondaries}
+                    onChange={(e) => setPrintIncludeSecondaries(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Secondaries Deck
+                </label>
+              </div>
             </div>
 
             {printLayout === 'tabular' ? (
@@ -3622,9 +3705,50 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   );
                 })()}
 
+                {/* Detachment Rules — every detachment rule granted by the selected detachments */}
+                {(() => {
+                  if (!printIncludeDetachmentRules) return null;
+                  const detachmentRules = getPrintableDetachmentRules(selectedDetachments);
+                  if (detachmentRules.length === 0) return null;
+
+                  return (
+                    <div className="print-page-break" style={{ marginTop: '2rem' }}>
+                      <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
+                        Detachment Rules
+                      </h3>
+                      <table className="print-bw-skim-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '18%' }}>Detachment</th>
+                            <th style={{ width: '22%' }}>Rule</th>
+                            <th style={{ width: '60%' }}>Details</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detachmentRules.map(rule => (
+                            <tr key={rule.id || `${rule.detachmentName}-${rule.name}`}>
+                              <td style={{ fontSize: '8pt', color: '#4b5563', verticalAlign: 'top' }}>{rule.detachmentName}</td>
+                              <td style={{ verticalAlign: 'top' }}><strong>{rule.name}</strong></td>
+                              <td style={{ fontSize: '8pt', verticalAlign: 'top' }}>
+                                {rule.lore && (
+                                  <div style={{ fontStyle: 'italic', color: '#4b5563', marginBottom: '4px' }}>
+                                    {rule.lore}
+                                  </div>
+                                )}
+                                {rule.rules ? <RulesText text={rule.rules} /> : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+
                 {/* Available Stratagems — every stratagem granted by the selected detachments,
                     with which detachment it comes from, its CP cost, and when it can be used. */}
                 {(() => {
+                  if (!printIncludeStratagems) return null;
                   const stratList = getPrintableStratagems(selectedDetachments);
                   if (stratList.length === 0) return null;
 
@@ -3662,6 +3786,279 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                                     <RulesText text={strat.restrictions} />
                                   </div>
                                 )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+
+                {/* Force Disposition, Terrain & Map Layouts Intel */}
+                {(() => {
+                  if (!printIncludeMissionIntel || !dispositionIntel) return null;
+                  const presetLetters = Array.from(new Set(
+                    dispositionIntel.matchups.flatMap(m => m.presets.map((p, idx) => getPresetLetter(p.presetName, p.layoutName, idx)))
+                  )).sort();
+
+                  return (
+                    <div className="print-page-break" style={{ marginTop: '2rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem' }}>
+                        <h3 style={{ textTransform: 'uppercase', margin: 0, fontSize: '1.1rem', color: '#000' }}>
+                          Tactical Intel: {dispositionIntel.friendlyDispositionName} (Force Disposition)
+                        </h3>
+                      </div>
+
+                      <p style={{ fontSize: '8pt', color: '#334155', margin: '0 0 1rem 0', lineHeight: 1.4 }}>
+                        Crossing your Force Disposition with your opponent’s dictates your Primary Mission and a set of recommended
+                        Map Layout &amp; Deployment presets. This disposition has {dispositionIntel.matchups.length} possible
+                        pairings ({dispositionIntel.totalPresets} recommended presets in total); the odds below assume each
+                        opposing disposition is equally likely.
+                      </p>
+
+                      {/* Deployment Odds & Likelihood Analysis */}
+                      <h4 style={{ textTransform: 'uppercase', fontSize: '0.95rem', margin: '0 0 0.5rem 0', color: '#000', borderBottom: '1px solid #cbd5e1', paddingBottom: '0.2rem' }}>
+                        Terrain / Map Layout Likelihood Distribution
+                      </h4>
+                      <table className="print-bw-skim-table" style={{ marginBottom: '1.5rem' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: '22%' }}>Deployment Map</th>
+                            <th style={{ width: '14%', textAlign: 'center' }}>Frequency</th>
+                            <th style={{ width: '16%', textAlign: 'center' }}>Likelihood</th>
+                            <th style={{ width: '48%' }}>Matchups / Presets Encountered</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dispositionIntel.deploymentFrequencies.map(freq => {
+                            const badge = getDeploymentLikelihoodBadge(freq.percentage);
+                            return (
+                              <tr key={freq.deploymentName}>
+                                <td><strong>{freq.deploymentName}</strong></td>
+                                <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                                  {freq.count} of {freq.totalPresets} ({freq.percentage}%)
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <span style={{
+                                    display: 'inline-block',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '7.5pt',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    background: badge.color,
+                                    color: badge.textColor,
+                                    border: '1px solid rgba(0,0,0,0.1)'
+                                  }}>
+                                    {badge.label}
+                                  </span>
+                                </td>
+                                <td style={{ fontSize: '8pt', color: '#334155' }}>
+                                  {freq.matchups.map(m => `vs ${m}`).join(', ')}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {dispositionIntel.neverEncounteredDeployments.map(depName => (
+                            <tr key={depName} style={{ opacity: 0.7 }}>
+                              <td><strong>{depName}</strong></td>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold', color: '#64748b' }}>0 of {dispositionIntel.totalPresets} (0%)</td>
+                              <td style={{ textAlign: 'center' }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '7.5pt',
+                                  fontWeight: 700,
+                                  textTransform: 'uppercase',
+                                  background: '#f3f4f6',
+                                  color: '#64748b',
+                                  border: '1px solid #cbd5e1'
+                                }}>
+                                  Never
+                                </span>
+                              </td>
+                              <td style={{ fontSize: '8pt', fontStyle: 'italic', color: '#64748b' }}>
+                                Never encountered under this disposition
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+
+                      {/* Matchup Presets & Primary Mission Matrix */}
+                      <h4 style={{ textTransform: 'uppercase', fontSize: '0.95rem', margin: '0 0 0.5rem 0', color: '#000', borderBottom: '1px solid #cbd5e1', paddingBottom: '0.2rem' }}>
+                        Opponent Matchups &amp; Recommended Presets
+                      </h4>
+                      <table className="print-bw-skim-table" style={{ marginBottom: '1.5rem' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: '18%' }}>Opponent Posture</th>
+                            <th style={{ width: '22%' }}>Your Primary Mission</th>
+                            {presetLetters.map(letter => (
+                              <th key={letter} style={{ width: `${Math.floor(60 / presetLetters.length)}%` }}>Layout {letter}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dispositionIntel.matchups.map(m => (
+                            <tr key={m.oppositionDispositionId}>
+                              <td style={{ fontWeight: 600 }}>vs {m.oppositionDispositionName}</td>
+                              <td>
+                                <strong>{m.primaryMission.name}</strong>
+                                {m.primaryMission.lore && (
+                                  <div style={{ fontSize: '7.5pt', fontStyle: 'italic', color: '#4b5563', marginTop: '2px' }}>
+                                    {m.primaryMission.lore}
+                                  </div>
+                                )}
+                              </td>
+                              {presetLetters.map(letter => {
+                                const preset = m.presets.find((p, idx) => getPresetLetter(p.presetName, p.layoutName, idx) === letter);
+                                return (
+                                  <td key={letter} style={{ fontSize: '8pt' }}>
+                                    {preset ? (
+                                      <div>
+                                        <strong>{preset.deploymentName}</strong>
+                                        <div style={{ fontSize: '7pt', color: '#64748b' }}>{preset.presetName}</div>
+                                      </div>
+                                    ) : '—'}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+
+                      {/* Primary Mission Rules & Scoring Reference */}
+                      <h4 style={{ textTransform: 'uppercase', fontSize: '0.95rem', margin: '0 0 0.5rem 0', color: '#000', borderBottom: '1px solid #cbd5e1', paddingBottom: '0.2rem' }}>
+                        Primary Mission Rules &amp; VP Scoring Reference
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {dispositionIntel.matchups.map(m => (
+                          <div key={`rule-${m.oppositionDispositionId}`} style={{ border: '1px solid #cbd5e1', padding: '0.5rem 0.75rem', borderRadius: '4px', background: '#fafafa', pageBreakInside: 'avoid' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                              <strong>{m.primaryMission.name} <span style={{ color: '#4b5563', fontWeight: 'normal', fontSize: '8pt' }}>(vs {m.oppositionDispositionName})</span></strong>
+                            </div>
+                            {m.primaryMission.lore && (
+                              <p style={{ margin: '0 0 0.4rem 0', fontStyle: 'italic', fontSize: '7.5pt', color: '#4b5563' }}>
+                                {m.primaryMission.lore}
+                              </p>
+                            )}
+                            {m.primaryMission.description && (
+                              <div style={{ fontSize: '8pt', marginBottom: '0.4rem' }}>
+                                <RulesText text={m.primaryMission.description} />
+                              </div>
+                            )}
+                            {m.primaryMission.objectives.length > 0 && (
+                              <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '0.4rem', marginTop: '0.4rem' }}>
+                                <strong style={{ fontSize: '7.5pt', textTransform: 'uppercase', color: '#475569' }}>Scoring Objectives:</strong>
+                                <ul style={{ margin: '0.2rem 0 0 0', paddingLeft: '1.2rem', fontSize: '8pt' }}>
+                                  {m.primaryMission.objectives.map(obj => (
+                                    <li key={obj.id} style={{ marginBottom: '2px' }}>
+                                      <span style={{ fontWeight: 600 }}>{obj.name}</span>
+                                      {obj.whenText && <span style={{ color: '#4b5563' }}> — {obj.whenText}</span>}
+                                      {obj.scoring.map(sc => (
+                                        <div key={sc.id} style={{ marginLeft: '0.5rem', color: '#0f172a' }}>
+                                          • <RulesText text={sc.scoringCriteria} /> <strong>({sc.victoryPoints} VP{sc.isCumulative ? ', Cumulative' : ''})</strong>
+                                        </div>
+                                      ))}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Chapter Approved Secondary Missions Deck */}
+                {(() => {
+                  if (!printIncludeSecondaries || secondaryMissions.length === 0) return null;
+
+                  return (
+                    <div className="print-page-break" style={{ marginTop: '2rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem' }}>
+                        <h3 style={{ textTransform: 'uppercase', margin: 0, fontSize: '1.1rem', color: '#000' }}>
+                          Chapter Approved Secondary Missions Deck
+                        </h3>
+                        <span style={{ fontSize: '8pt', color: '#4b5563' }}>{secondaryMissions.length} Cards (Tactical &amp; Fixed)</span>
+                      </div>
+
+                      <p style={{ fontSize: '8pt', color: '#334155', margin: '0 0 1rem 0', lineHeight: 1.4 }}>
+                        <em>Note:</em> A Force Disposition determines your Primary Mission and layout subset, not your Secondary
+                        Missions. The data links no secondaries to a disposition, so this is the full deck you can draw from
+                        (or declare secretly as Fixed Secondaries).
+                      </p>
+
+                      <table className="print-bw-skim-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '18%' }}>Secondary Mission</th>
+                            <th style={{ width: '10%', textAlign: 'center' }}>Type</th>
+                            <th style={{ width: '12%', textAlign: 'center' }}>Turn 1</th>
+                            <th style={{ width: '32%' }}>Scoring Criteria</th>
+                            <th style={{ width: '28%' }}>Rules &amp; Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {secondaryMissions.map(sm => (
+                            <tr key={sm.id}>
+                              <td style={{ verticalAlign: 'top' }}>
+                                <strong>{sm.name}</strong>
+                                {sm.lore && (
+                                  <div style={{ fontSize: '7.5pt', fontStyle: 'italic', color: '#4b5563', marginTop: '2px' }}>
+                                    {sm.lore}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ textAlign: 'center', verticalAlign: 'top' }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '1px 6px',
+                                  borderRadius: '3px',
+                                  fontSize: '7pt',
+                                  fontWeight: 'bold',
+                                  textTransform: 'uppercase',
+                                  background: sm.isFixedSecondary ? '#fef3c7' : '#e0f2fe',
+                                  color: sm.isFixedSecondary ? '#92400e' : '#0369a1',
+                                  border: '1px solid rgba(0,0,0,0.1)'
+                                }}>
+                                  {sm.isFixedSecondary ? 'Fixed / Tac' : 'Tactical'}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'center', fontSize: '8pt', verticalAlign: 'top' }}>
+                                {sm.isScorableFirstTurn ? 'Scorable' : 'Round 2+'}
+                              </td>
+                              <td style={{ fontSize: '8pt', verticalAlign: 'top' }}>
+                                {sm.objectives.map(obj => (
+                                  <div key={obj.id} style={{ marginBottom: '4px' }}>
+                                    {obj.scoring.map(sc => (
+                                      <div key={sc.id}>
+                                        • <RulesText text={sc.scoringCriteria} /> <strong>({sc.victoryPoints} VP)</strong>
+                                      </div>
+                                    ))}
+                                    {obj.whenText && (
+                                      <div style={{ fontSize: '7pt', color: '#64748b' }}>When: {obj.whenText}</div>
+                                    )}
+                                  </div>
+                                ))}
+                              </td>
+                              <td style={{ fontSize: '8pt', verticalAlign: 'top' }}>
+                                {sm.description && (
+                                  <div style={{ marginBottom: '4px' }}>
+                                    <RulesText text={sm.description} />
+                                  </div>
+                                )}
+                                {sm.actions.map(act => (
+                                  <div key={act.id} style={{ fontSize: '7.5pt', background: '#f8fafc', padding: '2px 4px', borderRadius: '2px', marginTop: '2px', border: '1px solid #e2e8f0' }}>
+                                    <strong>Action: {act.name}</strong> — {act.startsText} ({act.completesText})
+                                  </div>
+                                ))}
                               </td>
                             </tr>
                           ))}
@@ -3853,9 +4250,50 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
               })()}
             </div>
 
+            {/* Detachment Rule cards — every detachment rule granted by the selected detachments */}
+            {(() => {
+              if (!printIncludeDetachmentRules) return null;
+              const detachmentRules = getPrintableDetachmentRules(selectedDetachments);
+              if (detachmentRules.length === 0) return null;
+
+              return (
+                <div className="print-page-break" style={{ marginTop: '1.5rem' }}>
+                  <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
+                    Detachment Rule Cards
+                  </h3>
+                  <div className={`print-cards-grid cards-size-${cardSize}`}>
+                    {detachmentRules.map(rule => (
+                      <div key={rule.id || `${rule.detachmentName}-${rule.name}`} className="id1-datacard detachment-rule-datacard">
+                        <div className="id1-datacard-header">
+                          <div className="id1-datacard-title">{rule.name}</div>
+                          <div className="id1-datacard-points" style={{ fontSize: '7pt', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Rule</div>
+                        </div>
+                        <div className="detachment-rule-datacard-subhead">
+                          {rule.detachmentName}
+                        </div>
+                        <div className="id1-datacard-body">
+                          {rule.lore && (
+                            <div className="id1-datacard-row" style={{ fontStyle: 'italic', color: '#4b5563' }}>
+                              {rule.lore}
+                            </div>
+                          )}
+                          {rule.rules && (
+                            <div className="id1-datacard-row">
+                              <RulesText text={rule.rules} />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Stratagem cards — every stratagem granted by the selected detachments,
                 with which detachment it comes from, its CP cost, and when it can be used. */}
             {(() => {
+              if (!printIncludeStratagems) return null;
               const stratList = getPrintableStratagems(selectedDetachments);
               if (stratList.length === 0) return null;
 
@@ -3901,6 +4339,72 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                           )}
                         </div>
 
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Mission & Disposition Cards */}
+            {(() => {
+              if (!printIncludeMissionIntel || !dispositionIntel) return null;
+
+              return (
+                <div className="print-page-break" style={{ marginTop: '1.5rem' }}>
+                  <h3 style={{ textTransform: 'uppercase', borderBottom: '1.5px solid #000', paddingBottom: '0.25rem', marginBottom: '0.75rem', fontSize: '1.1rem', color: '#000' }}>
+                    Mission &amp; Disposition Cards
+                  </h3>
+                  <div className={`print-cards-grid cards-size-${cardSize}`}>
+                    {/* Overall Disposition Summary Card */}
+                    <div className="id1-datacard disposition-datacard">
+                      <div className="id1-datacard-header">
+                        <div className="id1-datacard-title">{dispositionIntel.friendlyDispositionName}</div>
+                        <div className="id1-datacard-points" style={{ fontSize: '7pt', textTransform: 'uppercase' }}>DISP</div>
+                      </div>
+                      <div className="detachment-rule-datacard-subhead">
+                        Layout Likelihood Distribution
+                      </div>
+                      <div className="id1-datacard-body" style={{ fontSize: '7pt' }}>
+                        {dispositionIntel.deploymentFrequencies.map(freq => (
+                          <div key={freq.deploymentName} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                            <span>{freq.deploymentName}:</span>
+                            <strong>{freq.count}/{freq.totalPresets} ({freq.percentage}%)</strong>
+                          </div>
+                        ))}
+                        {dispositionIntel.neverEncounteredDeployments.length > 0 && (
+                          <div style={{ marginTop: '3px', fontStyle: 'italic', color: '#64748b' }}>
+                            Never: {dispositionIntel.neverEncounteredDeployments.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Matchup Mission Cards */}
+                    {dispositionIntel.matchups.map(m => (
+                      <div key={m.oppositionDispositionId} className="id1-datacard disposition-datacard">
+                        <div className="id1-datacard-header">
+                          <div className="id1-datacard-title">{m.primaryMission.name}</div>
+                          <div className="id1-datacard-points" style={{ fontSize: '7pt', textTransform: 'uppercase' }}>MISSION</div>
+                        </div>
+                        <div className="detachment-rule-datacard-subhead">
+                          vs {m.oppositionDispositionName}
+                        </div>
+                        <div className="id1-datacard-body" style={{ fontSize: '7pt' }}>
+                          <div style={{ marginBottom: '3px', fontWeight: 600, color: '#1e293b' }}>
+                            Layouts: {m.presets.map((p, idx) => `${getPresetLetter(p.presetName, p.layoutName, idx)}: ${p.deploymentName}`).join(' · ')}
+                          </div>
+                          {m.primaryMission.description && (
+                            <div style={{ marginBottom: '3px' }}>
+                              <RulesText text={m.primaryMission.description} />
+                            </div>
+                          )}
+                          {m.primaryMission.objectives.flatMap(o => o.scoring).map(sc => (
+                            <div key={sc.id} style={{ color: '#0f172a' }}>
+                              • <RulesText text={sc.scoringCriteria} /> ({sc.victoryPoints}VP)
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>

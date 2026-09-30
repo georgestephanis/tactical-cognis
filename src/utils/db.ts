@@ -1,6 +1,14 @@
 import initSqlJs from 'sql.js';
 import type * as SQL from 'sql.js';
-import type { CoreRuleSection, CoreRuleContainer, CoreRuleComponent, CoreRuleFaqEntry } from '../types/data';
+import type {
+  CoreRuleSection,
+  CoreRuleContainer,
+  CoreRuleComponent,
+  CoreRuleFaqEntry,
+  DispositionIntel,
+  AppSecondaryMission
+} from '../types/data';
+import { assembleDispositionIntel, assembleSecondaryMissions } from './missionIntel';
 
 
 // Handle cases where initSqlJs might be nested in a 'default' property due to Vite/ESM mismatch
@@ -2120,3 +2128,148 @@ export async function getCoreRulesFaqs(): Promise<Record<string, CoreRuleFaqEntr
     return {};
   }
 }
+
+/**
+ * Fetches force disposition matchup data: the primary missions and recommended
+ * map layout presets (with deployments) when this disposition meets each opposing posture,
+ * along with overall deployment frequency and likelihood distribution.
+ */
+export async function getDispositionIntel(dispositionId: string): Promise<DispositionIntel | null> {
+  try {
+    const dispRows = await query('SELECT id, name FROM force_disposition WHERE id = ? LIMIT 1', [dispositionId]);
+    if (dispRows.length === 0) return null;
+    const friendlyName = String(dispRows[0].name);
+
+    // 1. Fetch matchup rows: friendly x opposition -> primary mission, preset, layout, deployment
+    const matchupRows = await query(`
+      SELECT 
+        fdm.id AS forceDispositionMissionId,
+        fd2.id AS oppositionDispositionId,
+        fd2.name AS oppositionDispositionName,
+        pm.id AS primaryMissionId,
+        pm.name AS primaryMissionName,
+        pm.lore AS primaryMissionLore,
+        pm.description AS primaryMissionDescription,
+        mp.id AS presetId,
+        mp.name AS presetName,
+        ml.id AS layoutId,
+        ml.name AS layoutName,
+        md.id AS deploymentId,
+        md.name AS deploymentName
+      FROM force_disposition_mission fdm
+      JOIN force_disposition fd2 ON fdm.oppositionForceDispositionId = fd2.id
+      JOIN primary_mission pm ON fdm.primaryMissionId = pm.id
+      LEFT JOIN force_disposition_mission_recommended_preset fdmrp ON fdmrp.forceDispositionMissionId = fdm.id
+      LEFT JOIN mission_preset mp ON fdmrp.missionPresetId = mp.id
+      LEFT JOIN mission_layout ml ON mp.missionLayoutId = ml.id
+      LEFT JOIN mission_deployment md ON mp.missionDeploymentId = md.id
+      WHERE fdm.friendlyForceDispositionId = ?
+      ORDER BY fd2.name, mp.name
+    `, [dispositionId]);
+
+    if (matchupRows.length === 0) return null;
+
+    // 2. Fetch primary mission objectives & scoring for the involved missions
+    const missionIds = Array.from(new Set(matchupRows.map(r => String(r.primaryMissionId))));
+    const missionIdPlaceholders = missionIds.map(() => '?').join(',');
+
+    let scoringRows: Record<string, unknown>[] = [];
+    try {
+      scoringRows = await query(`
+        SELECT 
+          pmo.primaryMissionId,
+          pmo.id AS objectiveId,
+          pmo.name AS objectiveName,
+          pmo.whenText,
+          pmo.displayOrder AS objectiveOrder,
+          pmos.id AS scoringId,
+          pmos.scoringCriteria,
+          pmos.victoryPoints,
+          pmos.isCumulative,
+          pmos.displayOrder AS scoringOrder
+        FROM primary_mission_objective pmo
+        JOIN primary_mission_objective_scoring pmos ON pmos.primaryMissionObjectiveId = pmo.id
+        WHERE pmo.primaryMissionId IN (${missionIdPlaceholders})
+        ORDER BY pmo.primaryMissionId, pmo.displayOrder, pmos.displayOrder
+      `, missionIds);
+    } catch (err) {
+      console.warn('Could not load primary mission scoring:', err);
+    }
+
+    // 4. Query all distinct standard deployments for frequency calculation. If this
+    // fails the "never encountered" list is left empty rather than guessed.
+    let allDeployments: string[] = [];
+    try {
+      const allDepRows = await query(`
+        SELECT DISTINCT md.name
+        FROM mission_deployment md
+        JOIN mission_preset mp ON mp.missionDeploymentId = md.id
+        JOIN force_disposition_mission_recommended_preset fdmrp ON fdmrp.missionPresetId = mp.id
+        ORDER BY md.name
+      `);
+      allDeployments = allDepRows.map(d => String(d.name));
+    } catch (err) {
+      console.warn('Could not load the deployment list for layout odds:', err);
+    }
+
+    return assembleDispositionIntel(dispositionId, friendlyName, matchupRows, scoringRows, allDeployments);
+  } catch (err) {
+    console.warn('Skipping disposition intel (tables missing or query failed):', err);
+    return null;
+  }
+}
+
+/**
+ * Fetches the universal Secondary Missions (Chapter Approved deck), with objectives,
+ * scoring criteria, and actions.
+ */
+export async function getSecondaryMissions(): Promise<AppSecondaryMission[]> {
+  try {
+    const smRows = await query(`
+      SELECT id, name, lore, description, isFixedSecondary, isScorableFirstTurn
+      FROM secondary_mission
+      ORDER BY isFixedSecondary DESC, name ASC
+    `);
+
+    if (smRows.length === 0) return [];
+
+    let objectiveRows: Record<string, unknown>[] = [];
+    try {
+      objectiveRows = await query(`
+        SELECT 
+          smo.secondaryMissionId,
+          smo.id AS objectiveId,
+          smo.name AS objectiveName,
+          smo.whenText,
+          smo.displayOrder AS objectiveOrder,
+          smos.id AS scoringId,
+          smos.scoringCriteria,
+          smos.victoryPoints,
+          smos.isCumulative,
+          smos.displayOrder AS scoringOrder
+        FROM secondary_mission_objective smo
+        JOIN secondary_mission_objective_scoring smos ON smos.secondaryMissionObjectiveId = smo.id
+        ORDER BY smo.secondaryMissionId, smo.displayOrder, smos.displayOrder
+      `);
+    } catch (err) {
+      console.warn('Could not load secondary mission objectives:', err);
+    }
+
+    let actionRows: Record<string, unknown>[] = [];
+    try {
+      actionRows = await query(`
+        SELECT secondaryMissionId, id AS actionId, name, startsText, completesText, effectText, restrictionText
+        FROM secondary_mission_action
+        ORDER BY secondaryMissionId, name
+      `);
+    } catch (err) {
+      console.warn('Could not load secondary mission actions:', err);
+    }
+
+    return assembleSecondaryMissions(smRows, objectiveRows, actionRows);
+  } catch (err) {
+    console.warn('Skipping secondary missions (table missing or query failed):', err);
+    return [];
+  }
+}
+
