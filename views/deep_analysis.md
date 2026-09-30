@@ -19,7 +19,7 @@ Users choose between three primary analysis workspaces:
 - **Points Efficiency Matrix (`efficiency`):** Computes point-yield ratios for every unit in the selected faction against a target preset. Ranks units based on:
   - *Wounds per 100 pts:* Raw durability efficiency.
   - *OC per 100 pts:* Objective control efficiency.
-  - *Damage per 100 pts:* Combat output efficiency (simulates all weapons in a unit firing at the selected target preset and scales damage vs points).
+  - *Damage per 100 pts:* Combat output efficiency (simulates the first model's listed weapons firing at the selected target preset, scales by the average model count, and divides by average tier cost; uses `selectProfilesForTarget` so Hunter weapons aren't double-counted). Cost is the mean of `getDatasheetCosts()` tier prices, which include the default-wargear surcharge. The Target Defender selector only applies to this metric; the top 15 are shown.
 - **Synergy & Transport Planner (`synergy`):** Plans troop transport details. The user selects a vehicle with the `TRANSPORT` keyword. The component reads transport rules from the database (e.g., `"This vehicle has a transport capacity of 12 models"`), parses the integer limit, and checks the occupancy of embarked infantry.
 
 ### 2. Calculations & Dice Parsing
@@ -64,4 +64,4 @@ The dashboard uses flex columns and interactive charts:
 
 - **[Dashboard](./dashboard.md):** Switch registry views using top navigation header tabs.
 - **[Army Builder](./army_builder.md):** Top navigation header links back to the roster builder.
-- **[Unit Details Modal](./unit_details.md):** Clicking unit names in the Points Efficiency lists opens the overlay modal.
+- **[Unit Details Modal](./unit_details.md):** Not linked — unit names in the efficiency lists are display-only.

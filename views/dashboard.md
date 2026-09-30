@@ -48,7 +48,7 @@ The dashboard uses a grid layout styled with vanilla CSS:
 
 ### Local State
 - `factions` (Array of `FactionSummary`): A parsed array of factions including their slug, name, total unit count, and detachment count.
-- `appStats` (`AppStats | null`): Numerical counts of active sqlite table files, datasheets, miniatures, wargear profiles, stratagems, and enhancements.
+- `appStats` (`AppStats | null`): (The hero bar displays only Data Version, Datasheets, Miniatures, Weapons & Wargear and Active Factions; the other counts are fetched but unused.) Numerical counts of active sqlite table files, datasheets, miniatures, wargear profiles, stratagems, and enhancements.
 - `searchQuery` (string): Text filter applied to the faction grid list.
 - `loading` (boolean): Displays a spinning loading symbol while records compile.
 
@@ -77,6 +77,7 @@ The dashboard uses a grid layout styled with vanilla CSS:
   FROM datasheet_faction_keyword 
   WHERE factionKeywordId IN (<ids>);
   ```
+  Detachment counts use the same shape against `detachment_faction_keyword` (`COUNT(DISTINCT detachmentId)`). Factions with no keyword ids, and meta-factions that are really sub-lists of another faction (Asuryani, Harlequins, Ynnari, the Chaos Legions entries, Heretic Astartes and similar), are filtered out of the list.
 
 ---
 

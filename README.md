@@ -1,6 +1,6 @@
 # ⚙️ Tactical Cognis
 
-A high-fidelity analytical web app for Warhammer 40k: Mathhammer simulator, points-efficiency matrix, army builder with live roster-legality validation (points/battle-size, Rule of 3, allied caps, excluded units, 0-1 keyword caps, mandatory Warlords, Warhammer Legends flagging, and sub-faction/allegiance choices), and detachment/stratagem browser. Everything renders from a SQLite database queried in-browser via [`sql.js`](https://sql.js.org/) — **no game data is bundled in this repo.**
+A high-fidelity analytical web app for Warhammer 40k: Mathhammer simulator, points-efficiency matrix, army builder with live roster-legality validation (points/battle-size, paid wargear, Rule of 3, allied caps, excluded units, 0-1 keyword caps, mandatory Warlords, Warhammer Legends flagging, and sub-faction/allegiance choices), and detachment/stratagem browser. Everything renders from a SQLite database queried in-browser via [`sql.js`](https://sql.js.org/) — **no game data is bundled in this repo.**
 
 This repo contains only the app and its build tooling. It does not include any datamining/scraping pipeline or Games Workshop content — you supply your own extracted database locally (see below), which stays untracked by git.
 
@@ -59,6 +59,7 @@ The dataset's first 11th-edition book (`Codex: Orks`) introduced two mechanics t
 
 - **Warhammer Legends datasheets** (`datasheet.isLegends`) — playable in open/narrative games but not matched play. Hidden by default behind *Include Legends* toggles in the Faction Browser and Army Builder, badged where shown, and raised as a roster validation error.
 - **Conditional "Hunter" weapon profiles** (`wargear_item_profile.hunterProfileKeyword`) — a statline usable only against particular target keywords, paired with a `Standard` line for everything else. Damage aggregation picks the applicable line rather than summing both.
-- **Force dispositions** (`detachment_force_disposition`) — a detachment's disposition, crossed with the opponent's, selects the primary mission. Shown per detachment, and where a detachment offers a *choice* of dispositions the Army Builder renders a selector, persists the pick, and validates that one has been made.
+- **Paid wargear** (`wargear_option.points`) — 11th edition reintroduced points-costed wargear. A unit costs its composition points plus every item it carries, defaults included; tier prices fold in the default loadout and the Army Builder charges only the difference for changes.
+- **Force dispositions** (`detachment_force_disposition`) — a detachment's disposition, crossed with the opponent's, selects the primary mission. Shown per detachment, used by the print export to list the matchup missions and how likely each deployment map is, and where a detachment offers a *choice* of dispositions the Army Builder renders a selector, persists the pick, and validates that one has been made.
 
 Companion-app databases vary by release, so columns added by newer versions are probed with `hasColumn()` before use; an older database degrades gracefully rather than failing to load.

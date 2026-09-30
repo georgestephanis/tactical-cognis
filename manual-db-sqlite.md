@@ -63,7 +63,7 @@ copy saved.
 ### 3. Verify it worked
 
 ```bash
-sqlite3 /Users/you/Desktop/db.sqlite "SELECT dataVersion FROM metadata;"
+sqlite3 /Users/you/Desktop/db.sqlite "SELECT DISTINCT dataVersion FROM metadata;"
 sqlite3 /Users/you/Desktop/db.sqlite ".tables"
 ```
 

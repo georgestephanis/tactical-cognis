@@ -31,6 +31,7 @@ The **Army Builder** view is a comprehensive roster-building workspace. It allow
   - **Selection Dropdown**: Mutually exclusive choices or default replacements (such as `Deff Rolla vs Tracks and wheels` or `Kannon vs Killkannon vs Zzap Gun`) render as dropdowns. Default/starting equipment is resolved and filtered out of the selection list to avoid duplication and instead shown inside the default placeholder option label (e.g. `-- Default Loadout (Tracks and wheels) --` or `-- Default Loadout (None) --`).
   - **Restricted Checkbox List**: Sets that have `limit > 1` but block duplicates and contain more choices than the limit render as checklists where options disable once the limit is met.
   - **Counter List**: Option sets that permit duplicate selections (such as equipping multiple `Big shootas`) render with `-` and `+` adjusters.
+- **Paid Wargear (11th edition):** Wargear can carry a points cost (`wargear_option.points`). A unit costs its composition points **plus the price of every item it is equipped with, defaults included**, so a tier's headline price (`getDatasheetCosts`) already folds in the default loadout's surcharge (`DerivedCost.wargearPoints`). The roster card then adds only the **delta** from the default loadout for the choices the player actually made (`getUnitWargearPoints`, negative when swapping a paid default for a free item) and shows it as a `(+N wargear)` tag. Picker options that cost points are annotated `(+N pts)` via `getChoicePoints`. Squad sizing for pricing resolves the tier's composition through `RosterUnit.compositionIndex` (not `selectedCostIndex`, which indexes the *filtered* cost list). All pricing logic lives in [src/utils/loadout.ts](../src/utils/loadout.ts) and is unit-tested in `tests/loadout.test.ts`. Datasheets without pricing data, and databases predating the column, are simply free.
 - **Combat Squad Split:** Eligible squads expose a split toggle (`splitSquad` on the roster unit). Split squads render a badge, display half points per half, and count as two units in printed output.
 
 ### 3. Live Validation Engine
@@ -70,6 +71,8 @@ Both paths match units against the faction catalog **and** allied units by norma
 
 **Print isolation.** The view's root element carries a `.view-root` marker class (see [faction_browser.md](./faction_browser.md) for the shared mechanism this fixed: a bug where builder-layout content was still visible underneath the print slate because `visibility: visible` on the ancestor chain re-showed the whole underlying tree, not just the slate).
 
+**Section toggles.** Checkboxes in the preview header switch each optional section on or off: *Collapse Units*, *Detachment Rules*, *Stratagems*, *Disposition & Map Intel*, and *Secondary Missions*. They are component state only.
+
 The Roster Print Slate Engine supports two black-and-white print styles:
 - **Tabular matched-play print sheet**: Outputs a layout suited for printing or PDF exports. Tabular sections (the Units Roster table, the Ranged Weapon Summary Profiles, and the Melee Weapon Summary Profiles) are separated by print-time page breaks (`break-before: page`), ensuring each summary section starts on a fresh page.
 - **Datacards Print Grid**: Prints datacards with page-break boundaries preventing cards from cutting off. The grid is centred on the page, so the left and right page margins are equal. Each card's weapons are rendered as a **table** — one row per weapon profile, with Range / A / Sk / S / AP / D columns — rather than a run-on string, and a conditional ("Hunter") profile is flagged with the keywords it requires.
@@ -89,6 +92,15 @@ Two things make this more than a box resize:
 
 ID-1 keeps `overflow: hidden` and its exact height — content that doesn't fit is clipped, which is the trade-off for the spec size. The larger sizes exist precisely to *show* that content, so they switch to an auto height with a min-height, let long keyword and weapon text wrap instead of ellipsing, and pack content to the top rather than spreading it.
 
+**Rules, stratagems and mission intel.** Beyond the roster itself, both layouts can print reference material for the selected detachments and force disposition (tabular: tables; datacards: one card each):
+
+- **Detachment Rules** — every rule granted by the selected detachments (`getPrintableDetachmentRules`).
+- **Stratagems** — every stratagem the selected detachments grant, with CP cost and timing (`getPrintableStratagems`).
+- **Disposition & Map Intel** — for the army's active force disposition (the single mapped one, or the player's pick where a detachment offers a choice), `getDispositionIntel()` returns each opposing disposition's primary mission with its VP scoring, and the layout/deployment presets recommended for that pairing. `calculateDeploymentFrequencies()` then reports how often each deployment map appears across those presets, rated *Most Likely / Likely / Rare / Never* (`getDeploymentLikelihoodBadge`). The odds treat every opposing disposition as equally likely. Layout columns (A/B/C…) come from the preset names (`getPresetLetter`), not array position.
+- **Secondary Missions** — the mission pack's full secondary deck (`getSecondaryMissions()`) with Fixed/Tactical type, first-turn scorability, scoring and actions. **Nothing in the database ties a secondary to a disposition**, so this is the same deck for every army; the print says so.
+
+The row-to-result assembly for the last two lives in [src/utils/missionIntel.ts](../src/utils/missionIntel.ts) (pure, unit-tested in `tests/missionIntel.test.ts`); `db.ts` only runs the SQL. Mission data is fetched when the print preview opens and each query is guarded, so a database without these tables just omits the sections.
+
 **Roster hierarchy on print.** Ordering comes from `groupAttachedEntries()` in [src/utils/rosterPrint.ts](../src/utils/rosterPrint.ts) (pure, unit-tested in `tests/rosterPrint.test.ts`). The **bodyguard squad is the top-level row**, with its attached Leader and Support characters indented beneath it — Leaders first, then Support. The squad is what attachments attach *to*, so it reads as the parent, and the ordering stays correct when a squad has a Support character but no Leader (which previously left the squad indented beneath nothing). Unattached units follow as independent rows. The same function serves both the collapsed and uncollapsed views, so the two can't drift.
 
 ---
@@ -105,7 +117,7 @@ ID-1 keeps `overflow: hidden` and its exact height — content that doesn't fit 
 
 **Enhancements and Upgrades.** A detachment enhancement taken by a non-Character unit (an "Upgrade", gated by `enhancement.isEquipableByNonCharacterUnit`) is stored on the *same* `enhancementName` / `enhancementPoints` fields as a Character's enhancement. Every format therefore prints it, and non-Character ones are suffixed `(Upgrade)` to keep the distinction — a suffix the text importer strips, so exports still round-trip. The tabular print sheet labels the row `Upgrade:` rather than `Enhancement:` for the same reason.
 
-Per-unit points in every format are `getUnitActualPoints()` **plus** enhancement points, so the printed unit figures add up to the printed total. (The `standard` format previously omitted the enhancement line and its points for non-Character units entirely.)
+Per-unit points in every format are `getUnitTotalPoints()` — `getUnitActualPoints()` (tier price and stepped duplicate pricing) **plus** wargear taken beyond the default loadout **plus** enhancement points — so the printed unit figures add up to the printed total. (The `standard` format previously omitted the enhancement line and its points for non-Character units entirely.)
 
 ## 🎨 Visual Design & Style Systems
 
@@ -128,7 +140,7 @@ The editor uses a split-screen grid layout:
 
 ### Persistence
 - Roster lists are saved as serialized JSON in the browser's `localStorage` under the key `'tactical_cognis_armies'`.
-- Print-slate preferences (`printLayout`, `cardSize`, `collapseDuplicates`) are component state only — they are not persisted, and reset to Tabular / ID-1 / uncollapsed each session.
+- Print-slate preferences (`printLayout`, `cardSize`, `collapseDuplicates`, and the `printInclude*` section toggles) are component state only — they are not persisted, and reset to Tabular / ID-1 / uncollapsed each session.
 
 ---
 
