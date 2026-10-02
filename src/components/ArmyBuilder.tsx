@@ -3776,6 +3776,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   if (!printIncludeStratagems) return null;
                   const stratList = getPrintableStratagems(selectedDetachments);
                   if (stratList.length === 0) return null;
+                  // 11th-edition detachments carry no stratagem category, so only
+                  // print the column when at least one stratagem has one.
+                  const showCategory = stratList.some(s => s.category);
 
                   return (
                     <div className="print-page-break" style={{ marginTop: '2rem' }}>
@@ -3788,9 +3791,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                             <th style={{ width: '13%' }}>Detachment</th>
                             <th style={{ width: '16%' }}>Stratagem</th>
                             <th style={{ width: '6%', textAlign: 'center' }}>CP</th>
-                            <th style={{ width: '11%' }}>Category</th>
+                            {showCategory && <th style={{ width: '11%' }}>Category</th>}
                             <th style={{ width: '20%' }}>When</th>
-                            <th style={{ width: '34%' }}>Effect</th>
+                            <th style={{ width: showCategory ? '34%' : '45%' }}>Effect</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3799,7 +3802,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                               <td style={{ fontSize: '8pt', color: '#4b5563' }}>{strat.detachmentName}</td>
                               <td><strong>{strat.name}</strong></td>
                               <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{strat.cpCost || '—'}</td>
-                              <td style={{ fontSize: '8pt' }}>{formatStratagemCategory(strat.category)}</td>
+                              {showCategory && <td style={{ fontSize: '8pt' }}>{formatStratagemCategory(strat.category)}</td>}
                               <td style={{ fontSize: '8pt' }}>{strat.when ? <RulesText text={strat.when} /> : '—'}</td>
                               <td style={{ fontSize: '8pt' }}>
                                 {strat.target && (
