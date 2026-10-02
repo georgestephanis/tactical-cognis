@@ -9,6 +9,7 @@ import type {
   AppSecondaryMission,
   DispositionIntel,
   DispositionMatchup,
+  ForceDisposition,
   PrimaryMissionObjective,
   SecondaryMissionAction,
   SecondaryMissionObjective
@@ -16,6 +17,46 @@ import type {
 import { calculateDeploymentFrequencies } from './rosterPrint';
 
 type Row = Record<string, unknown>;
+
+/** A force disposition the army could deploy under, and the detachments that offer it. */
+export interface ArmyDispositionOption extends ForceDisposition {
+  detachmentNames: string[];
+}
+
+/**
+ * Every force disposition the selected detachments make available, deduped by
+ * id, in first-offered order. An army declares one disposition (the companion
+ * app stores a single `roster.forceDispositionId`), chosen from among these.
+ */
+export function collectArmyDispositions(
+  detachments: { name: string; forceDispositions?: ForceDisposition[] }[]
+): ArmyDispositionOption[] {
+  const byId = new Map<string, ArmyDispositionOption>();
+  for (const d of detachments) {
+    for (const fd of d.forceDispositions || []) {
+      const existing = byId.get(fd.id);
+      if (existing) {
+        if (!existing.detachmentNames.includes(d.name)) existing.detachmentNames.push(d.name);
+      } else {
+        byId.set(fd.id, { id: fd.id, name: fd.name, detachmentNames: [d.name] });
+      }
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * The disposition actually in play: the declared one if the current detachments
+ * still offer it, otherwise the only option when there is exactly one. Returns
+ * null when a choice is needed — never silently picks one of several.
+ */
+export function resolveArmyDisposition(
+  options: ArmyDispositionOption[],
+  selectedId: string | null | undefined
+): string | null {
+  if (selectedId && options.some(o => o.id === selectedId)) return selectedId;
+  return options.length === 1 ? options[0].id : null;
+}
 
 const str = (v: unknown): string => String(v);
 const optStr = (v: unknown): string | null => (v != null ? String(v) : null);

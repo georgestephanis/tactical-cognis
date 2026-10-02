@@ -12,7 +12,9 @@
 import {
   assembleDispositionIntel,
   assembleSecondaryMissions,
-  getPresetLetter
+  collectArmyDispositions,
+  getPresetLetter,
+  resolveArmyDisposition
 } from '../src/utils/missionIntel';
 
 function assert(cond: boolean, msg: string) {
@@ -147,6 +149,31 @@ console.log('Testing: assembleSecondaryMissions');
   // Objective/action queries can fail independently; the deck must still render.
   const bare = assembleSecondaryMissions(missions, [], []);
   assert(bare.length === 2 && bare[0].objectives.length === 0, 'cards survive missing objective and action rows');
+}
+console.log('  ✅ PASS');
+
+
+console.log('Test: army disposition options and resolution');
+{
+  const dets = [
+    { name: 'Detachment One', forceDispositions: [{ id: 'fd-a', name: 'Posture A' }] },
+    { name: 'Detachment Two', forceDispositions: [{ id: 'fd-b', name: 'Posture B' }, { id: 'fd-a', name: 'Posture A' }] },
+    { name: 'Detachment Three', forceDispositions: [] },
+    { name: 'Detachment Four' }
+  ];
+  const opts = collectArmyDispositions(dets);
+  assert(opts.length === 2, 'dispositions deduped across detachments');
+  assert(opts[0].id === 'fd-a' && opts[1].id === 'fd-b', 'first-offered order kept');
+  assert(opts[0].detachmentNames.join('|') === 'Detachment One|Detachment Two', 'every offering detachment recorded');
+  assert(collectArmyDispositions([]).length === 0, 'no detachments, no options');
+
+  assert(resolveArmyDisposition(opts, 'fd-b') === 'fd-b', 'declared disposition wins');
+  assert(resolveArmyDisposition(opts, null) === null, 'several options and no choice resolves to null, not the first');
+  assert(resolveArmyDisposition(opts, 'fd-gone') === null, 'stale choice (detachment removed) is ignored');
+  const single = collectArmyDispositions([dets[0]]);
+  assert(resolveArmyDisposition(single, null) === 'fd-a', 'single option resolves implicitly');
+  assert(resolveArmyDisposition(single, 'fd-gone') === 'fd-a', 'stale choice falls back to the single option');
+  assert(resolveArmyDisposition([], 'fd-a') === null, 'no options resolves to null');
 }
 console.log('  ✅ PASS');
 

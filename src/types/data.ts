@@ -466,10 +466,11 @@ export interface ArmyList {
   /** Declared sub-faction keyword names (e.g. a Space Marine Chapter). */
   selectedSubfactionKeywords?: string[];
   /**
-   * Chosen force disposition id, keyed by detachment id. Only meaningful for a
-   * detachment offering more than one; single-disposition detachments are
-   * resolved implicitly.
+   * The force disposition the army deploys under, chosen from those its
+   * detachments offer. Unset when only one is on offer (resolved implicitly).
    */
+  selectedForceDispositionId?: string | null;
+  /** Legacy per-detachment disposition picks from older saves; migrated to selectedForceDispositionId on load. */
   selectedForceDispositionIds?: Record<string, string>;
   /** Legacy single-detachment fields from older saves; migrated to detachmentSlugs on load. */
   detachmentSlug?: string | null;
