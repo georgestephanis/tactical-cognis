@@ -1710,6 +1710,8 @@ export interface DbRosterDetail {
   units: DbRosterUnitDetail[];
   /** Distinct allegiance ability ids declared across the roster's units, if any. */
   allegianceAbilityIds: string[];
+  /** The roster's declared force disposition (`roster.forceDispositionId`), when the schema has it. */
+  forceDispositionId: string | null;
 }
 
 const rosterFactionSlug = (factionName: string): string => {
@@ -1758,8 +1760,11 @@ export const getSavedDbRosters = async (): Promise<SavedDbRosterSummary[]> => {
  * units, per-model counts, wargear selections, enhancements, and leader attachments.
  */
 export const getDbRosterDetail = async (rosterId: string): Promise<DbRosterDetail | null> => {
+  const dispositionCol = (await hasColumn('roster', 'forceDispositionId'))
+    ? 'r.forceDispositionId'
+    : 'NULL AS forceDispositionId';
   const rosterRows = await query(`
-    SELECT r.id, r.name, fk.name AS factionName, bs.pointsLimit
+    SELECT r.id, r.name, fk.name AS factionName, bs.pointsLimit, ${dispositionCol}
     FROM roster r
     LEFT JOIN faction_keyword fk ON fk.id = r.factionKeywordId
     LEFT JOIN battle_size bs ON bs.id = r.battleSizeId
@@ -1899,6 +1904,7 @@ export const getDbRosterDetail = async (rosterId: string): Promise<DbRosterDetai
     pointsLimit: rosterRow.pointsLimit != null ? Number(rosterRow.pointsLimit) : null,
     units,
     allegianceAbilityIds,
+    forceDispositionId: rosterRow.forceDispositionId != null ? String(rosterRow.forceDispositionId) : null,
   };
 };
 

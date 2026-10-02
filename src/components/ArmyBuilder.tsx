@@ -16,12 +16,13 @@ import {
 } from 'lucide-react';
 import { loadAndMergeFaction, normalizeName, getDatasheetCosts } from '../utils/dataMapper';
 import { groupAttachedEntries, getPrintableDetachmentRules, getDeploymentLikelihoodBadge } from '../utils/rosterPrint';
-import { getPresetLetter } from '../utils/missionIntel';
+import { getPresetLetter, collectArmyDispositions, resolveArmyDisposition } from '../utils/missionIntel';
 import { getRosterUnitModelCounts, getUnitActiveWeapons, getLoadoutWargearPoints, getChoicePoints } from '../utils/loadout';
 import type { AttachableEntry, PrintableUnitWrapper } from '../utils/rosterPrint';
 import type { MergedFaction } from '../utils/dataMapper';
 import RulesText from './RulesText';
 import DetachmentHovercard from './DetachmentHovercard';
+import MissionPreview from './MissionPreview';
 import { getBattleSizes, getFactionList, getSavedDbRosters, getDbRosterDetail, getDispositionIntel, getSecondaryMissions } from '../utils/db';
 import type { BattleSize, SavedDbRosterSummary, DbRosterDetail } from '../utils/db';
 import type { RosterUnit, MergedUnit, MergedDetachment, ArmyList, Weapon, Model, Ability, DatasheetRule, WargearChoiceSet, WargearChoice, AppEnhancement, AppStratagem, ConditionalKeywordGrant, DispositionIntel, AppSecondaryMission } from '../types/data';
@@ -1186,9 +1187,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // allegiance validation. Persisted with the roster.
   const [selectedAllegianceAbilityIds, setSelectedAllegianceAbilityIds] = useState<string[]>([]);
   const [selectedSubfactionKeywords, setSelectedSubfactionKeywords] = useState<string[]>([]);
-  // Chosen force disposition per detachment id. Only detachments offering more
-  // than one need an entry; a single-disposition detachment resolves implicitly.
-  const [selectedForceDispositionIds, setSelectedForceDispositionIds] = useState<Record<string, string>>({});
+  // The force disposition the army deploys under. Only needed when the selected
+  // detachments offer more than one; a single option resolves implicitly.
+  const [selectedForceDispositionId, setSelectedForceDispositionId] = useState<string | null>(null);
   const [battleSizes, setBattleSizes] = useState<BattleSize[]>([]);
   const [roster, setRoster] = useState<RosterUnit[]>([]);
   const [pointLimit, setPointLimit] = useState<number>(2000);
@@ -1257,6 +1258,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   // Dynamic tactical intelligence for chosen force disposition & secondary missions
   const [dispositionIntel, setDispositionIntel] = useState<DispositionIntel | null>(null);
   const [secondaryMissions, setSecondaryMissions] = useState<AppSecondaryMission[]>([]);
+  // The collapsible in-builder mission preview; intel only loads while it is open.
+  const [isMissionPreviewOpen, setIsMissionPreviewOpen] = useState(false);
+  // Disposition the loaded `dispositionIntel` belongs to (undefined: nothing loaded yet).
+  const [dispositionIntelFor, setDispositionIntelFor] = useState<string | null | undefined>(undefined);
 
   // Import states
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
@@ -1290,7 +1295,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       detachmentSlugs: selectedDetachmentSlugs,
       selectedAllegianceAbilityIds,
       selectedSubfactionKeywords,
-      selectedForceDispositionIds,
+      selectedForceDispositionId,
       pointLimit,
       units: roster
     };
@@ -1321,7 +1326,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     setSelectedDetachmentSlugs(army.detachmentSlugs);
     setSelectedAllegianceAbilityIds(army.selectedAllegianceAbilityIds ?? []);
     setSelectedSubfactionKeywords(army.selectedSubfactionKeywords ?? []);
-    setSelectedForceDispositionIds(army.selectedForceDispositionIds ?? {});
+    setSelectedForceDispositionId(
+      army.selectedForceDispositionId ?? Object.values(army.selectedForceDispositionIds ?? {})[0] ?? null
+    );
     setPointLimit(army.pointLimit);
     setCustomLimitInput(army.pointLimit.toString());
     setIsCustomLimit(![1000, 2000, 3000].includes(army.pointLimit));
@@ -1799,6 +1806,9 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       // Carry any declared allegiance abilities through the import. The ids are
       // stable allegiance_ability ids and resolve against the loaded faction data.
       setSelectedAllegianceAbilityIds(detail.allegianceAbilityIds || []);
+      // Likewise the roster's declared force disposition; resolveArmyDisposition
+      // ignores it if the imported detachments don't actually offer it.
+      setSelectedForceDispositionId(detail.forceDispositionId);
     } catch (err) {
       console.error('Failed to import roster from database:', err);
       alert('Failed to import this roster from the database.');
@@ -2038,22 +2048,19 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     .map(id => allAllegianceAbilities.find(a => a.id === id)?.name)
     .filter((n): n is string => !!n);
 
-  // Active chosen force disposition ID (resolved from chosen selection or implicit single option)
-  const activeDispositionId = React.useMemo(() => {
-    for (const d of selectedDetachments) {
-      const opts = d.forceDispositions || [];
-      if (opts.length > 1) {
-        if (selectedForceDispositionIds[d.id]) return selectedForceDispositionIds[d.id];
-      } else if (opts.length === 1) {
-        return opts[0].id;
-      }
-    }
-    return null;
-  }, [selectedDetachments, selectedForceDispositionIds]);
+  // Force dispositions on offer across every selected detachment, and the one in
+  // play. With several on offer the army must declare one — it decides the
+  // primary mission and map presets on the print slate and in the preview.
+  const armyDispositionOptions = React.useMemo(
+    () => collectArmyDispositions(selectedDetachments),
+    [selectedDetachments]
+  );
+  const activeDispositionId = resolveArmyDisposition(armyDispositionOptions, selectedForceDispositionId);
 
-  // Load disposition matchup intel & secondary missions when print preview is open
+  // Load disposition matchup intel & secondary missions when the print preview
+  // or the in-builder mission preview is open.
   useEffect(() => {
-    if (!isPrintPreviewOpen) return;
+    if (!isPrintPreviewOpen && !isMissionPreviewOpen) return;
     let active = true;
 
     Promise.all([
@@ -2063,14 +2070,18 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       .then(([intel, secondaries]) => {
         if (!active) return;
         setDispositionIntel(intel);
+        setDispositionIntelFor(activeDispositionId);
         setSecondaryMissions(secondaries);
       })
       .catch(err => {
         console.warn('Failed to load print slate mission/disposition data:', err);
+        if (!active) return;
+        setDispositionIntel(null);
+        setDispositionIntelFor(activeDispositionId);
       });
 
     return () => { active = false; };
-  }, [isPrintPreviewOpen, activeDispositionId]);
+  }, [isPrintPreviewOpen, isMissionPreviewOpen, activeDispositionId]);
 
   // Filter list of catalog units
   const filteredCatalog = factionData ? [...factionData.units, ...(factionData.alliedUnits || [])].filter(unit => {
@@ -2163,17 +2174,15 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
       );
     }
 
-    // 2a-ii. Force disposition. Where a detachment offers a choice of dispositions,
-    // one must be declared — it determines the primary mission via
-    // `force_disposition_mission`, so leaving it unset leaves the list incomplete.
-    selectedDetachments.forEach(d => {
-      const options = d.forceDispositions || [];
-      if (options.length > 1 && !selectedForceDispositionIds[d.id]) {
-        validationErrors.push(
-          `${d.name} offers a choice of force disposition (${options.map(o => o.name).join(' or ')}) — one must be selected.`
-        );
-      }
-    });
+    // 2a-ii. Force disposition. Where the detachments offer more than one, the
+    // army must declare which it deploys under — it determines the primary
+    // mission via `force_disposition_mission`, so leaving it unset leaves the
+    // list incomplete.
+    if (armyDispositionOptions.length > 1 && !activeDispositionId) {
+      validationErrors.push(
+        `Your detachments offer a choice of force disposition (${armyDispositionOptions.map(o => o.name).join(' or ')}) — one must be selected.`
+      );
+    }
 
     // 2b. Excluded datasheets — units barred from the faction outright
     // (faction_keyword_excluded_datasheet) or from a selected detachment
@@ -2543,7 +2552,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   setSelectedDetachmentSlugs([]);
                   setSelectedAllegianceAbilityIds([]);
                   setSelectedSubfactionKeywords([]);
-                  setSelectedForceDispositionIds({});
+                  setSelectedForceDispositionId(null);
                   if (!slug) setFactionData(null);
                 }}
                 style={{
@@ -2868,39 +2877,60 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                   </div>
                 )}
 
-                {/* Force disposition. A detachment's disposition, crossed with the
-                    opponent's, selects the primary mission. Almost every detachment
-                    offers exactly one (shown read-only); where it offers several the
-                    player must choose. */}
-                {selectedDetachments.filter(d => (d.forceDispositions || []).length > 0).map(d => {
-                  const options = d.forceDispositions || [];
-                  const isChoice = options.length > 1;
-                  const chosen = isChoice
-                    ? (selectedForceDispositionIds[d.id] || '')
-                    : options[0].id;
-                  return (
-                    <div key={`fd-${d.slug}`} className="input-group" style={{ marginTop: '0.5rem' }}>
-                      <label style={{ fontSize: '0.8rem' }}>
-                        Force Disposition <span style={{ color: 'var(--text-muted)' }}>— {d.name}</span>
-                        {isChoice && <span style={{ color: 'var(--accent-gold)' }}> (choose one)</span>}
-                      </label>
-                      {isChoice ? (
-                        <select
-                          className="input-control"
-                          value={chosen}
-                          onChange={(e) => setSelectedForceDispositionIds(prev => ({ ...prev, [d.id]: e.target.value }))}
-                        >
-                          <option value="">-- Select disposition --</option>
-                          {options.map(o => (
-                            <option key={o.id} value={o.id}>{o.name}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{options[0].name}</span>
-                      )}
-                    </div>
-                  );
-                })}
+                {/* Force disposition. The army deploys under one disposition, which,
+                    crossed with the opponent's, selects the primary mission and map
+                    presets. Usually the detachments offer exactly one (shown
+                    read-only); where they offer several the player must choose. */}
+                {armyDispositionOptions.length > 0 && (
+                  <div className="input-group" style={{ marginTop: '0.5rem' }}>
+                    <label style={{ fontSize: '0.8rem' }}>
+                      Force Disposition
+                      {armyDispositionOptions.length > 1 && <span style={{ color: 'var(--accent-gold)' }}> (choose one)</span>}
+                    </label>
+                    {armyDispositionOptions.length > 1 ? (
+                      <div role="radiogroup" aria-label="Force Disposition" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        {armyDispositionOptions.map(o => {
+                          const checked = activeDispositionId === o.id;
+                          return (
+                            <label
+                              key={o.id}
+                              title={`Offered by ${o.detachmentNames.join(', ')}`}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer',
+                                background: checked ? 'rgba(0, 242, 254, 0.1)' : 'var(--bg-tertiary)',
+                                border: `1px solid ${checked ? 'var(--accent-teal)' : 'var(--glass-border)'}`,
+                                borderRadius: '6px', padding: '0.3rem 0.65rem', fontSize: '0.85rem'
+                              }}
+                            >
+                              <input
+                                type="radio"
+                                name="army-force-disposition"
+                                value={o.id}
+                                checked={checked}
+                                onChange={() => setSelectedForceDispositionId(o.id)}
+                              />
+                              {o.name}
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>({o.detachmentNames.join(', ')})</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{armyDispositionOptions[0].name}</span>
+                    )}
+                  </div>
+                )}
+
+                {armyDispositionOptions.length > 0 && (
+                  <MissionPreview
+                    open={isMissionPreviewOpen}
+                    onToggle={setIsMissionPreviewOpen}
+                    hasDisposition={!!activeDispositionId}
+                    loading={dispositionIntelFor !== activeDispositionId}
+                    intel={activeDispositionId ? dispositionIntel : null}
+                    secondaryMissions={secondaryMissions}
+                  />
+                )}
 
                 {/* Allegiance / sub-faction selectors — each group unlocks conditional
                     keyword grants and drives allegiance validation. Detachment-scoped
@@ -3730,11 +3760,6 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                               <td style={{ fontSize: '8pt', color: '#4b5563', verticalAlign: 'top' }}>{rule.detachmentName}</td>
                               <td style={{ verticalAlign: 'top' }}><strong>{rule.name}</strong></td>
                               <td style={{ fontSize: '8pt', verticalAlign: 'top' }}>
-                                {rule.lore && (
-                                  <div style={{ fontStyle: 'italic', color: '#4b5563', marginBottom: '4px' }}>
-                                    {rule.lore}
-                                  </div>
-                                )}
                                 {rule.rules ? <RulesText text={rule.rules} /> : '—'}
                               </td>
                             </tr>
@@ -3907,11 +3932,6 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                               <td style={{ fontWeight: 600 }}>vs {m.oppositionDispositionName}</td>
                               <td>
                                 <strong>{m.primaryMission.name}</strong>
-                                {m.primaryMission.lore && (
-                                  <div style={{ fontSize: '7.5pt', fontStyle: 'italic', color: '#4b5563', marginTop: '2px' }}>
-                                    {m.primaryMission.lore}
-                                  </div>
-                                )}
                               </td>
                               {presetLetters.map(letter => {
                                 const preset = m.presets.find((p, idx) => getPresetLetter(p.presetName, p.layoutName, idx) === letter);
@@ -3941,11 +3961,6 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
                               <strong>{m.primaryMission.name} <span style={{ color: '#4b5563', fontWeight: 'normal', fontSize: '8pt' }}>(vs {m.oppositionDispositionName})</span></strong>
                             </div>
-                            {m.primaryMission.lore && (
-                              <p style={{ margin: '0 0 0.4rem 0', fontStyle: 'italic', fontSize: '7.5pt', color: '#4b5563' }}>
-                                {m.primaryMission.lore}
-                              </p>
-                            )}
                             {m.primaryMission.description && (
                               <div style={{ fontSize: '8pt', marginBottom: '0.4rem' }}>
                                 <RulesText text={m.primaryMission.description} />
@@ -4010,11 +4025,6 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                             <tr key={sm.id}>
                               <td style={{ verticalAlign: 'top' }}>
                                 <strong>{sm.name}</strong>
-                                {sm.lore && (
-                                  <div style={{ fontSize: '7.5pt', fontStyle: 'italic', color: '#4b5563', marginTop: '2px' }}>
-                                    {sm.lore}
-                                  </div>
-                                )}
                               </td>
                               <td style={{ textAlign: 'center', verticalAlign: 'top' }}>
                                 <span style={{
@@ -4272,11 +4282,6 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                           {rule.detachmentName}
                         </div>
                         <div className="id1-datacard-body">
-                          {rule.lore && (
-                            <div className="id1-datacard-row" style={{ fontStyle: 'italic', color: '#4b5563' }}>
-                              {rule.lore}
-                            </div>
-                          )}
                           {rule.rules && (
                             <div className="id1-datacard-row">
                               <RulesText text={rule.rules} />
