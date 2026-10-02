@@ -1256,7 +1256,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
   const [printIncludeSecondaries, setPrintIncludeSecondaries] = useState<boolean>(true);
 
   // Dynamic tactical intelligence for chosen force disposition & secondary missions
-  const [dispositionIntel, setDispositionIntel] = useState<DispositionIntel | null>(null);
+  const [loadedDispositionIntel, setDispositionIntel] = useState<DispositionIntel | null>(null);
   const [secondaryMissions, setSecondaryMissions] = useState<AppSecondaryMission[]>([]);
   // The collapsible in-builder mission preview; intel only loads while it is open.
   const [isMissionPreviewOpen, setIsMissionPreviewOpen] = useState(false);
@@ -1822,6 +1822,12 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
     try {
       const parsed = parseBattleForgeText(importText, dbFactions);
+      // A text export carries no force disposition, so don't let the previous
+      // list's pick ride along — cleared only once an import actually proceeds.
+      const beginTextImport = (run: () => void) => {
+        setSelectedForceDispositionId(null);
+        run();
+      };
 
       if (parsed.units.length === 0) {
         alert("No units found to import. Please check that the raw text is from the Warhammer 40k Companion App export.");
@@ -1830,7 +1836,7 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
 
       if (parsed.factionSlug && parsed.factionSlug !== selectedFactionSlug) {
         if (!selectedFactionSlug) {
-          importIntoFaction(parsed, parsed.factionSlug);
+          beginTextImport(() => importIntoFaction(parsed, parsed.factionSlug!));
         } else {
           const newFactionName = dbFactions.find(f => f.slug === parsed.factionSlug)?.faction || parsed.factionName || parsed.factionSlug;
           const currentFactionName = dbFactions.find(f => f.slug === selectedFactionSlug)?.faction || selectedFactionSlug;
@@ -1840,15 +1846,15 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
           );
 
           if (confirmSwitch) {
-            importIntoFaction(parsed, parsed.factionSlug);
+            beginTextImport(() => importIntoFaction(parsed, parsed.factionSlug!));
           }
         }
       } else {
         if (factionData) {
-          startImportOrResolve(parsed, factionData);
+          beginTextImport(() => startImportOrResolve(parsed, factionData));
         } else {
           if (parsed.factionSlug) {
-            importIntoFaction(parsed, parsed.factionSlug);
+            beginTextImport(() => importIntoFaction(parsed, parsed.factionSlug!));
           } else {
             alert("Please select a faction workspace before importing a roster with no detected faction.");
           }
@@ -2056,6 +2062,10 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
     [selectedDetachments]
   );
   const activeDispositionId = resolveArmyDisposition(armyDispositionOptions, selectedForceDispositionId);
+  // Only trust loaded intel for the disposition it was fetched for, so a change
+  // made while both previews were closed never prints the old disposition's missions.
+  const isDispositionIntelCurrent = dispositionIntelFor === activeDispositionId;
+  const dispositionIntel = isDispositionIntelCurrent ? loadedDispositionIntel : null;
 
   // Load disposition matchup intel & secondary missions when the print preview
   // or the in-builder mission preview is open.
@@ -2926,8 +2936,8 @@ export const ArmyBuilder: React.FC<ArmyBuilderProps> = ({
                     open={isMissionPreviewOpen}
                     onToggle={setIsMissionPreviewOpen}
                     hasDisposition={!!activeDispositionId}
-                    loading={dispositionIntelFor !== activeDispositionId}
-                    intel={activeDispositionId ? dispositionIntel : null}
+                    loading={!isDispositionIntelCurrent}
+                    intel={dispositionIntel}
                     secondaryMissions={secondaryMissions}
                   />
                 )}
