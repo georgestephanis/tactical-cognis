@@ -11,6 +11,9 @@ import type {
 import { assembleDispositionIntel, assembleSecondaryMissions } from './missionIntel';
 import { parseHunterKeywords, isMalformedHunterKeyword } from './mathhammer';
 
+/** Newest companion-app data version this app has been verified against. Shown as the UI fallback until a DB loads — bump it after each refresh. */
+export const LATEST_TESTED_DB_VERSION = 995;
+
 
 // Handle cases where initSqlJs might be nested in a 'default' property due to Vite/ESM mismatch
 const getInitSqlJs = () => {

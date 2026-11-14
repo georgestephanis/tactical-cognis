@@ -9,13 +9,13 @@ import { CoreRules } from './components/CoreRules';
 import { DatabaseUploadView } from './components/DatabaseUploadView';
 import type { MergedUnit } from './types/data';
 import { loadAndMergeFaction } from './utils/dataMapper';
-import { initDatabase, getDbStats } from './utils/db';
+import { initDatabase, getDbStats, LATEST_TESTED_DB_VERSION } from './utils/db';
 
 function App() {
   const [view, setView] = useState<'dashboard' | 'faction' | 'analysis' | 'builder' | 'rules'>('dashboard');
   const [activeFactionSlug, setActiveFactionSlug] = useState<string | null>(null);
   const [activeUnit, setActiveUnit] = useState<MergedUnit | null>(null);
-  const [dbVersion, setDbVersion] = useState<number>(875);
+  const [dbVersion, setDbVersion] = useState<number>(LATEST_TESTED_DB_VERSION);
 
   const [isDbLoadedState, setIsDbLoadedState] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
