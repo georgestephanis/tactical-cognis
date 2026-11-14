@@ -4,6 +4,7 @@ import { loadAndMergeFaction, getDatasheetCosts } from '../utils/dataMapper';
 import type { MergedFaction } from '../utils/dataMapper';
 import type { MergedUnit, WeaponProfile } from '../types/data';
 import RulesText from './RulesText';
+import { LATEST_TESTED_DB_VERSION } from '../utils/db';
 
 interface FactionBrowserProps {
   factionSlug: string;
@@ -16,7 +17,7 @@ export const FactionBrowser: React.FC<FactionBrowserProps> = ({
   factionSlug,
   onBack,
   onSelectUnit,
-  appDataVersion = 875
+  appDataVersion = LATEST_TESTED_DB_VERSION
 }) => {
   const [factionData, setFactionData] = useState<MergedFaction | null>(null);
   const [loading, setLoading] = useState(true);

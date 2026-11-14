@@ -31,7 +31,7 @@ prompt. The file lives at `public/40k.sqlite` locally and is gitignored.
   sidecar files.
 
 ```bash
-sqlite3 public/40k.sqlite 'SELECT DISTINCT dataVersion FROM metadata;'   # e.g. 963
+sqlite3 public/40k.sqlite 'SELECT DISTINCT dataVersion FROM metadata;'   # e.g. 995
 sqlite3 public/40k.sqlite '.tables'                             # list all tables
 sqlite3 public/40k.sqlite '.schema datasheet'                   # one table's DDL
 ```
@@ -63,29 +63,29 @@ sqlite3 public/40k.sqlite '.schema datasheet'                   # one table's DD
 
 ## Table map
 
-Approximate row counts from data version 963 — they drift slowly between versions but
+Approximate row counts from data version 995 — they drift slowly between versions but
 the shape doesn't.
 
 ### Datasheets & models — the unit core
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `datasheet` | 1,163 | `id`, `name`, `lore`, `baseSize`, `maxModelCount`, `unitComposition` (prose), `publicationId`, `isFreeFromEntitlements`, **`isLegends`** |
-| `miniature` | 1,584 | statline columns, `datasheetId`, `statlineHidden`, `isSupremeCommander`, `cannotBeWarlord`, `miniatureSlots` |
-| `unit_composition` | 1,521 | `datasheetId`, **`points` (INTEGER)**, `isDefault` — one row per legal size/price tier |
+| `datasheet` | 1,174 | `id`, `name`, `lore`, `baseSize`, `maxModelCount`, `unitComposition` (prose), `publicationId`, `isFreeFromEntitlements`, **`isLegends`** |
+| `miniature` | 1,593 | statline columns, `datasheetId`, `statlineHidden`, `isSupremeCommander`, `cannotBeWarlord`, `miniatureSlots` |
+| `unit_composition` | 1,526 | `datasheetId`, **`points` (INTEGER)**, `isDefault` — one row per legal size/price tier |
 | `unit_composition_miniature` | — | which miniatures (`min`/`max` of each) fill each tier |
 | `datasheet_points_step` | — | `datasheetId`, `stepAt` (model count), `stepPoints` — stepped pricing for block-sold units |
 | `datasheet_damage` | — | bracketed "damaged" statlines for vehicles/monsters |
 | `invulnerable_save` | — | `datasheetId`/`miniatureId`, `save`/`meleeSave`/`rangedSave`, `rules` |
-| `miniature_keyword` ↔ `keyword` (1,169) | — | per-model keywords |
-| `datasheet_faction_keyword` ↔ `faction_keyword` (43) | — | faction keywords a datasheet carries — the practical "what army is this?" link |
+| `miniature_keyword` ↔ `keyword` (1,173) | — | per-model keywords |
+| `datasheet_faction_keyword` ↔ `faction_keyword` (44) | — | faction keywords a datasheet carries — the practical "what army is this?" link |
 
 ### Wargear & loadouts
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `wargear_item` | 4,036 | `name`, `wargearType`, `ruleText` — names repeat; items are per-datasheet instances |
-| `wargear_item_profile` | 4,355 | `wargearItemId`, `name`, `type` (ranged/melee), `range`, `attacks`, `ballisticSkill`/`weaponSkill`, `strength`, `armourPenetration`, `damage`, **`hunterProfileKeyword`** (conditional profile — see [Hunter profiles](#conditional-hunter-weapon-profiles)) |
+| `wargear_item` | 4,150 | `name`, `wargearType`, `ruleText` — names repeat; items are per-datasheet instances |
+| `wargear_item_profile` | 4,485 | `wargearItemId`, `name`, `type` (ranged/melee), `range`, `attacks`, `ballisticSkill`/`weaponSkill`, `strength`, `armourPenetration`, `damage`, **`hunterProfileKeyword`** (conditional profile — see [Hunter profiles](#conditional-hunter-weapon-profiles)) |
 | `wargear_ability` + `wargear_item_profile_wargear_ability` | — | weapon special rules and their links to profiles |
 | `base_miniature_loadout` / `base_miniature_loadout_wargear_option` | — | baseline gear each miniature starts with |
 | `loadout_choice_set` → `loadout_choice` → `loadout_choice_wargear_item` | — | default loadout + swap options (`limit`, `alternate`) |
@@ -96,7 +96,7 @@ the shape doesn't.
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `datasheet_ability` + `datasheet_datasheet_ability` | 2,269 | `name`, `abilityType` (`core`/`faction`/`datasheet`), `rules`, `isPsychic`/`isAura`, `armyRuleId`, `detachmentRuleId`; the link table carries `restriction` |
+| `datasheet_ability` + `datasheet_datasheet_ability` | 2,329 | `name`, `abilityType` (`core`/`faction`/`datasheet`), `rules`, `isPsychic`/`isAura`, `armyRuleId`, `detachmentRuleId`; the link table carries `restriction` |
 | `datasheet_sub_ability`, `datasheet_rule` | — | nested sub-abilities / per-datasheet rules |
 | `army_rule` + `army_rule_faction_keyword` | — | faction-wide rules, keyword-gated |
 | `allegiance_ability` / `allegiance_ability_group` | — | chapter/legion-style allegiance abilities |
@@ -107,16 +107,16 @@ the shape doesn't.
 
 | Table | ~Rows | Key columns / links |
 |---|---|---|
-| `detachment` | 276 | `name`, **`detachmentPointsCost` (INTEGER)** — the base DP cost (1–3), `isCombatPatrol`, `publicationId` |
-| `detachment_faction_detachment_points_cost` | ~4 | per-faction DP-cost **overrides**: `(detachmentId, factionKeywordId)` composite PK + `detachmentPointsCost`. When a detachment costs different DP for a specific faction, the override wins — `COALESCE(override, base)` |
+| `detachment` | 282 | `name`, **`detachmentPointsCost` (INTEGER)** — the base DP cost (1–3), `isCombatPatrol`, `publicationId` |
+| `detachment_faction_detachment_points_cost` | 0 (currently empty) | per-faction DP-cost **overrides**: `(detachmentId, factionKeywordId)` composite PK + `detachmentPointsCost`. When a detachment costs different DP for a specific faction, the override wins — `COALESCE(override, base)` |
 | `detachment_rule` | — | `name`, `detachmentId`; rule text hangs off `rule_container_component.detachmentRuleId` |
 | `detachment_faction_keyword` | — | which faction(s) a detachment belongs to |
 | `detachment_unique_keyword` | — | keyword uniqueness restrictions within the detachment |
 | `detachment_detail*`, `detachment_force_disposition`, `detachment_*_datasheet`, `detachment_*_warlord_miniature` | — | flavour bullets, force-disposition link, composition/warlord gating |
-| `enhancement` | 866 | `name`, `rules`, `basePointsCost` (INTEGER), `detachmentId`, `enhancementType`, `cannotBeWarlord` |
+| `enhancement` | 869 | `name`, `rules`, `basePointsCost` (INTEGER), `detachmentId`, `enhancementType`, `cannotBeWarlord` |
 | `enhancement_*` (keyword groups, required wargear) | — | which units may take each enhancement |
 | `enhancement_*` (`bodyguard_group(_datasheet/_keyword)`) | — | which squad(s) an enhancement additionally lets its wearer lead/support, once taken |
-| `stratagem` | 1,290 | `name`, `cpCost` (TEXT), `category` (`battleTactic`/`epicDeed`/`strategicPloy`/…), `whenRules`/`targetRules`/`effectRules`/`restrictionRules`, `key`, `detachmentId` |
+| `stratagem` | 1,292 | `name`, `cpCost` (TEXT), `category` (`battleTactic`/`epicDeed`/`strategicPloy`/…), `whenRules`/`targetRules`/`effectRules`/`restrictionRules`, `key`, `detachmentId` |
 | `stratagem_phase` | — | phases each stratagem can fire in |
 
 ### Leader / bodyguard attachments
@@ -463,7 +463,7 @@ mission presets on top.
 | Table | Rows | Purpose |
 | --- | --- | --- |
 | `force_disposition` | 5 | The five deployment postures (names live in your own database) |
-| `detachment_force_disposition` | 311 | Which disposition(s) a detachment may deploy under |
+| `detachment_force_disposition` | 316 | Which disposition(s) a detachment may deploy under |
 | `force_disposition_mission` | 25 | (friendly × opposition) → primary mission |
 | `force_disposition_mission_recommended_preset` | 75 | Recommended mission presets per pairing |
 
